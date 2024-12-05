@@ -1,88 +1,29 @@
 package client
 
 import (
-	"bufio"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"os"
-	"strings"
+	"mezon-sdk/mezon-protobuf/mezon/v2/common/rtapi"
+	"sync"
+
 	"time"
+
+	"mezon-sdk/constants"
+	"mezon-sdk/utils"
 
 	"github.com/asticode/go-astiav"
 	"github.com/pion/webrtc/v4"
-	"github.com/pion/webrtc/v4/pkg/media"
 )
 
-func main() {
-	// Everything below is the Pion WebRTC API! Thanks for using it ❤️.
-
-	// Prepare the configuration
-	config := webrtc.Configuration{}
-
-	// Create a new RTCPeerConnection
-	peerConnection, err := webrtc.NewPeerConnection(config)
-	if err != nil {
-		panic(err)
-	}
-
-	// Set the handler for ICE connection state
-	// This will notify you when the peer has connected/disconnected
-	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
-		fmt.Printf("Connection State has changed %s \n", connectionState.String())
-	})
-
-	// Create a video track
-	videoTrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: "video/h264"}, "video", "pion")
-	if err != nil {
-		panic(err)
-	}
-	_, err = peerConnection.AddTrack(videoTrack)
-	if err != nil {
-		panic(err)
-	}
-
-	// Wait for the offer to be pasted
-	offer := webrtc.SessionDescription{}
-	decode(readUntilNewline(), &offer)
-
-	// Set the remote SessionDescription
-	err = peerConnection.SetRemoteDescription(offer)
-	if err != nil {
-		panic(err)
-	}
-
-	// Create an answer
-	answer, err := peerConnection.CreateAnswer(nil)
-	if err != nil {
-		panic(err)
-	}
-
-	// Create channel that is blocked until ICE Gathering is complete
-	gatherComplete := webrtc.GatheringCompletePromise(peerConnection)
-
-	// Sets the LocalDescription, and starts our UDP listeners
-	err = peerConnection.SetLocalDescription(answer)
-	if err != nil {
-		panic(err)
-	}
-
-	<-gatherComplete
-
-	// Output the answer in base64 so we can paste it in browser
-	fmt.Println(encode(peerConnection.LocalDescription()))
-
-	// Start pushing buffers on these tracks
-	writeH264ToTrack(videoTrack)
-
-	// Block forever
-	select {}
-}
-
-// nolint: gochecknoglobals
 var (
+	mapChannelRtcconnection sync.Map // map[channelId]*RTCConnection
+)
+
+type RTCConnection struct {
+	peer *webrtc.PeerConnection
+	ws   *WSConnection
+
 	inputFormatContext *astiav.FormatContext
 
 	decodeCodecContext *astiav.CodecContext
@@ -96,218 +37,301 @@ var (
 	encodePacket         *astiav.Packet
 
 	pts int64
-	err error
-)
+}
 
-func writeH264ToTrack(track *webrtc.TrackLocalStaticSample) {
+func NewRTCConnection(config webrtc.Configuration, channelId, clanId string) error {
+	peerConnection, err := webrtc.NewPeerConnection(config)
+	if err != nil {
+		return err
+	}
+	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
+		fmt.Printf("Connection State has changed %s \n", connectionState.String())
+	})
+
+	// Create a video track
+	videoTrack, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: "video/h264"}, "video", "pion")
+	if err != nil {
+		return err
+	}
+	// Create a audio track
+	audioTrack, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: "video/h264"}, "video", "pion")
+	if err != nil {
+		return err
+	}
+	_, err = peerConnection.AddTrack(audioTrack)
+	if err != nil {
+		return err
+	}
+
+	mapChannelRtcconnection.Store(channelId, &RTCConnection{
+		peer: peerConnection,
+	})
+
+	// TODO: connect websocket
+
+	// Start pushing buffers on these tracks
+	if rtcc, ok := mapChannelRtcconnection.Load(channelId); ok {
+		rtcc.(*RTCConnection).writeH264ToTrack(videoTrack)
+	}
+
+	// Block forever
+	select {}
+}
+
+func (c *RTCConnection) onWebsocketEvent(event *rtapi.Envelope) error {
+	switch event.Message.(type) {
+	case *rtapi.Envelope_JoinPttChannel:
+		eventData := event.GetJoinPttChannel()
+		switch eventData.DataType {
+		case constants.WEBRTC_SDP_ANSWER:
+			unzipData, _ := utils.GzipUncompress(eventData.JsonData)
+			var answer webrtc.SessionDescription
+			err := json.Unmarshal([]byte(unzipData), &answer)
+			if err != nil {
+				return err
+			}
+
+			return c.recvAnswer(answer)
+
+		case constants.WEBRTC_ICE_CANDIDATE:
+
+			var i webrtc.ICECandidateInit
+			err := json.Unmarshal([]byte(eventData.JsonData), &i)
+			if err != nil {
+				return err
+			}
+
+			return c.addICECandidate(i)
+		}
+
+	}
+	return nil
+}
+
+func (c *RTCConnection) sendOffer() error {
+	offer, err := c.peer.CreateOffer(nil)
+	if err != nil {
+		return err
+	}
+	if err := c.peer.SetLocalDescription(offer); err != nil {
+		return err
+	}
+
+	byteJson, _ := json.Marshal(offer)
+	dataEnc, _ := utils.GzipCompress(string(byteJson))
+
+	//TODO: send ws , gzip compress data
+	return c.ws.SendMessage(&rtapi.Envelope{
+		Cid: "",
+		Message: &rtapi.Envelope_JoinPttChannel{
+			JoinPttChannel: &rtapi.JoinPTTChannel{
+				JsonData: dataEnc,
+				DataType: constants.WEBRTC_SDP_OFFER,
+			},
+		},
+	})
+}
+
+func (c *RTCConnection) recvAnswer(answer webrtc.SessionDescription) error {
+	if err := c.peer.SetRemoteDescription(answer); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *RTCConnection) onICECandidate(i *webrtc.ICECandidate, channelId, userId string) error {
+	if i == nil {
+		return nil
+	}
+	// If you are serializing a candidate make sure to use ToJSON
+	// Using Marshal will result in errors around `sdpMid`
+	candidateString, err := json.Marshal(i.ToJSON())
+	if err != nil {
+		return err
+	}
+
+	return c.ws.SendMessage(&rtapi.Envelope{Message: &rtapi.Envelope_JoinPttChannel{JoinPttChannel: &rtapi.JoinPTTChannel{
+		ReceiverId: userId,
+		DataType:   constants.WEBRTC_ICE_CANDIDATE,
+		JsonData:   string(candidateString),
+		ChannelId:  channelId,
+	}}})
+}
+
+func (c *RTCConnection) addICECandidate(i webrtc.ICECandidateInit) error {
+	return c.peer.AddICECandidate(i)
+}
+
+func (c *RTCConnection) writeH264ToTrack(track *webrtc.TrackLocalStaticRTP) error {
 	astiav.RegisterAllDevices()
 
-	initTestSrc()
-	defer freeVideoCoding()
+	c.initTestSrc()
+	defer c.freeVideoCoding()
 
-	h264FrameDuration := time.Duration(float64(time.Second) / videoStream.AvgFrameRate().Float64())
+	h264FrameDuration := time.Duration(float64(time.Second) / c.videoStream.AvgFrameRate().Float64())
 
 	ticker := time.NewTicker(h264FrameDuration)
 	for ; true; <-ticker.C {
-		decodePacket.Unref()
+		c.decodePacket.Unref()
 
 		// Read frame from lavfi
-		if err = inputFormatContext.ReadFrame(decodePacket); err != nil {
+		if err := c.inputFormatContext.ReadFrame(c.decodePacket); err != nil {
 			if errors.Is(err, astiav.ErrEof) {
 				break
 			}
-			panic(err)
+			return err
 		}
 
-		decodePacket.RescaleTs(videoStream.TimeBase(), decodeCodecContext.TimeBase())
+		c.decodePacket.RescaleTs(c.videoStream.TimeBase(), c.decodeCodecContext.TimeBase())
 
 		// Send the packet
-		if err = decodeCodecContext.SendPacket(decodePacket); err != nil {
-			panic(err)
+		if err := c.decodeCodecContext.SendPacket(c.decodePacket); err != nil {
+			return err
 		}
 
 		for {
 			// Read Decoded Frame
-			if err = decodeCodecContext.ReceiveFrame(decodeFrame); err != nil {
+			if err := c.decodeCodecContext.ReceiveFrame(c.decodeFrame); err != nil {
 				if errors.Is(err, astiav.ErrEof) || errors.Is(err, astiav.ErrEagain) {
 					break
 				}
-				panic(err)
+				return err
 			}
 
 			// Init the Scaling+Encoding. Can't be started until we know info on input video
-			initVideoEncoding()
+			c.initVideoEncoding()
 
 			// Scale the video
-			if err = softwareScaleContext.ScaleFrame(decodeFrame, scaledFrame); err != nil {
-				panic(err)
+			if err := c.softwareScaleContext.ScaleFrame(c.decodeFrame, c.scaledFrame); err != nil {
+				return err
 			}
 
 			// We don't care about the PTS, but encoder complains if unset
-			pts++
-			scaledFrame.SetPts(pts)
+			c.pts++
+			c.scaledFrame.SetPts(c.pts)
 
 			// Encode the frame
-			if err = encodeCodecContext.SendFrame(scaledFrame); err != nil {
-				panic(err)
+			if err := c.encodeCodecContext.SendFrame(c.scaledFrame); err != nil {
+				return err
 			}
 
 			for {
 				// Read encoded packets and write to file
-				encodePacket = astiav.AllocPacket()
-				if err = encodeCodecContext.ReceivePacket(encodePacket); err != nil {
+				c.encodePacket = astiav.AllocPacket()
+				if err := c.encodeCodecContext.ReceivePacket(c.encodePacket); err != nil {
 					if errors.Is(err, astiav.ErrEof) || errors.Is(err, astiav.ErrEagain) {
 						break
 					}
-					panic(err)
+					return err
 				}
 
 				// Write H264 to track
-				if err = track.WriteSample(media.Sample{Data: encodePacket.Data(), Duration: h264FrameDuration}); err != nil {
-					panic(err)
+				if _, err := track.Write(c.encodePacket.Data()); err != nil {
+					return err
 				}
 			}
 		}
 	}
+	return nil
 }
 
-func initTestSrc() {
-	if inputFormatContext = astiav.AllocFormatContext(); inputFormatContext == nil {
-		panic("Failed to AllocCodecContext")
+func (c *RTCConnection) initTestSrc() error {
+	if c.inputFormatContext = astiav.AllocFormatContext(); c.inputFormatContext == nil {
+		return errors.New("Failed to AllocCodecContext")
 	}
 
 	// Open input
-	if err = inputFormatContext.OpenInput("testsrc=size=640x480:rate=30", astiav.FindInputFormat("lavfi"), nil); err != nil {
-		panic(err)
+	if err := c.inputFormatContext.OpenInput("testsrc=size=640x480:rate=30", astiav.FindInputFormat("lavfi"), nil); err != nil {
+		return err
 	}
 
 	// Find stream info
-	if err = inputFormatContext.FindStreamInfo(nil); err != nil {
-		panic(err)
+	if err := c.inputFormatContext.FindStreamInfo(nil); err != nil {
+		return err
 	}
 
-	videoStream = inputFormatContext.Streams()[0]
+	c.videoStream = c.inputFormatContext.Streams()[0]
 
-	decodeCodec := astiav.FindDecoder(videoStream.CodecParameters().CodecID())
+	decodeCodec := astiav.FindDecoder(c.videoStream.CodecParameters().CodecID())
 	if decodeCodec == nil {
-		panic("FindDecoder returned nil")
+		return errors.New("FindDecoder returned nil")
 	}
 
-	if decodeCodecContext = astiav.AllocCodecContext(decodeCodec); decodeCodecContext == nil {
-		panic(err)
+	if c.decodeCodecContext = astiav.AllocCodecContext(decodeCodec); c.decodeCodecContext == nil {
+		return errors.New("AllocCodecContext returned nil")
 	}
 
-	if err = videoStream.CodecParameters().ToCodecContext(decodeCodecContext); err != nil {
-		panic(err)
+	if err := c.videoStream.CodecParameters().ToCodecContext(c.decodeCodecContext); err != nil {
+		return err
 	}
 
-	decodeCodecContext.SetFramerate(inputFormatContext.GuessFrameRate(videoStream, nil))
+	c.decodeCodecContext.SetFramerate(c.inputFormatContext.GuessFrameRate(c.videoStream, nil))
 
-	if err = decodeCodecContext.Open(decodeCodec, nil); err != nil {
-		panic(err)
+	if err := c.decodeCodecContext.Open(decodeCodec, nil); err != nil {
+		return err
 	}
 
-	decodePacket = astiav.AllocPacket()
-	decodeFrame = astiav.AllocFrame()
+	c.decodePacket = astiav.AllocPacket()
+	c.decodeFrame = astiav.AllocFrame()
+	return nil
 }
 
-func initVideoEncoding() {
-	if encodeCodecContext != nil {
-		return
+func (c *RTCConnection) initVideoEncoding() (err error) {
+	if c.encodeCodecContext != nil {
+		return nil
 	}
 
 	h264Encoder := astiav.FindEncoder(astiav.CodecIDH264)
 	if h264Encoder == nil {
-		panic("No H264 Encoder Found")
+		return errors.New("No H264 Encoder Found")
 	}
 
-	if encodeCodecContext = astiav.AllocCodecContext(h264Encoder); encodeCodecContext == nil {
-		panic("Failed to AllocCodecContext Decoder")
+	if c.encodeCodecContext = astiav.AllocCodecContext(h264Encoder); c.encodeCodecContext == nil {
+		return errors.New("Failed to AllocCodecContext Decoder")
 	}
 
-	encodeCodecContext.SetPixelFormat(astiav.PixelFormatYuv420P)
-	encodeCodecContext.SetSampleAspectRatio(decodeCodecContext.SampleAspectRatio())
-	encodeCodecContext.SetTimeBase(astiav.NewRational(1, 30))
-	encodeCodecContext.SetWidth(decodeCodecContext.Width())
-	encodeCodecContext.SetHeight(decodeCodecContext.Height())
+	c.encodeCodecContext.SetPixelFormat(astiav.PixelFormatYuv420P)
+	c.encodeCodecContext.SetSampleAspectRatio(c.decodeCodecContext.SampleAspectRatio())
+	c.encodeCodecContext.SetTimeBase(astiav.NewRational(1, 30))
+	c.encodeCodecContext.SetWidth(c.decodeCodecContext.Width())
+	c.encodeCodecContext.SetHeight(c.decodeCodecContext.Height())
 
 	encodeCodecContextDictionary := astiav.NewDictionary()
-	if err = encodeCodecContextDictionary.Set("bf", "0", astiav.NewDictionaryFlags()); err != nil {
-		panic(err)
+	if err := encodeCodecContextDictionary.Set("bf", "0", astiav.NewDictionaryFlags()); err != nil {
+		return err
 	}
 
-	if err = encodeCodecContext.Open(h264Encoder, encodeCodecContextDictionary); err != nil {
-		panic(err)
+	if err = c.encodeCodecContext.Open(h264Encoder, encodeCodecContextDictionary); err != nil {
+		return err
 	}
 
-	softwareScaleContext, err = astiav.CreateSoftwareScaleContext(
-		decodeCodecContext.Width(),
-		decodeCodecContext.Height(),
-		decodeCodecContext.PixelFormat(),
-		decodeCodecContext.Width(),
-		decodeCodecContext.Height(),
+	c.softwareScaleContext, err = astiav.CreateSoftwareScaleContext(
+		c.decodeCodecContext.Width(),
+		c.decodeCodecContext.Height(),
+		c.decodeCodecContext.PixelFormat(),
+		c.decodeCodecContext.Width(),
+		c.decodeCodecContext.Height(),
 		astiav.PixelFormatYuv420P,
 		astiav.NewSoftwareScaleContextFlags(astiav.SoftwareScaleContextFlagBilinear),
 	)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
-	scaledFrame = astiav.AllocFrame()
+	c.scaledFrame = astiav.AllocFrame()
+	return nil
 }
 
-func freeVideoCoding() {
-	inputFormatContext.CloseInput()
-	inputFormatContext.Free()
+func (c *RTCConnection) freeVideoCoding() {
+	c.inputFormatContext.CloseInput()
+	c.inputFormatContext.Free()
 
-	decodeCodecContext.Free()
-	decodePacket.Free()
-	decodeFrame.Free()
+	c.decodeCodecContext.Free()
+	c.decodePacket.Free()
+	c.decodeFrame.Free()
 
-	scaledFrame.Free()
-	softwareScaleContext.Free()
-	encodeCodecContext.Free()
-	encodePacket.Free()
-}
-
-// Read from stdin until we get a newline
-func readUntilNewline() (in string) {
-	var err error
-
-	r := bufio.NewReader(os.Stdin)
-	for {
-		in, err = r.ReadString('\n')
-		if err != nil && !errors.Is(err, io.EOF) {
-			panic(err)
-		}
-
-		if in = strings.TrimSpace(in); len(in) > 0 {
-			break
-		}
-	}
-
-	fmt.Println("")
-	return
-}
-
-// JSON encode + base64 a SessionDescription
-func encode(obj *webrtc.SessionDescription) string {
-	b, err := json.Marshal(obj)
-	if err != nil {
-		panic(err)
-	}
-
-	return base64.StdEncoding.EncodeToString(b)
-}
-
-// Decode a base64 and unmarshal JSON into a SessionDescription
-func decode(in string, obj *webrtc.SessionDescription) {
-	b, err := base64.StdEncoding.DecodeString(in)
-	if err != nil {
-		panic(err)
-	}
-
-	if err = json.Unmarshal(b, obj); err != nil {
-		panic(err)
-	}
+	c.scaledFrame.Free()
+	c.softwareScaleContext.Free()
+	c.encodeCodecContext.Free()
+	c.encodePacket.Free()
 }

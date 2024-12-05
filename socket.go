@@ -19,15 +19,16 @@ type WSConnection struct {
 	conn        *websocket.Conn
 	baseWS      string
 	clanId      string
-	recvHandler func(*rtapi.Envelope) error
+	recvHandler []func(*rtapi.Envelope) error
 }
 
 type IWSConnection interface {
 	SendMessage(data *rtapi.Envelope) error
+	SetRecvHandler(recvHandler func(*rtapi.Envelope) error)
 	Close() error
 }
 
-func GetWSConnection(baseWS string, clanId string, recvHandler func(*rtapi.Envelope) error) (IWSConnection, error) {
+func GetWSConnection(baseWS string, clanId string, recvHandler ...func(*rtapi.Envelope) error) (IWSConnection, error) {
 	if client == nil {
 		client = &WSConnection{
 			baseWS:      baseWS,
@@ -80,6 +81,10 @@ func (s *WSConnection) SendMessage(data *rtapi.Envelope) error {
 		return err
 	}
 	return s.conn.WriteMessage(websocket.BinaryMessage, jsonData)
+}
+
+func (s *WSConnection) SetRecvHandler(recvHandler func(*rtapi.Envelope) error) {
+	s.recvHandler = append(s.recvHandler, recvHandler)
 }
 
 func (s *WSConnection) joinClan(clanId string) error {
@@ -156,9 +161,11 @@ func (s *WSConnection) recvMessage() {
 				continue
 			}
 
-			err = s.recvHandler(request)
-			if err != nil {
-				continue
+			for _, handler := range s.recvHandler {
+				err = handler(request)
+				if err != nil {
+					continue
+				}
 			}
 		}
 	}()

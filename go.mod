@@ -1,4 +1,4 @@
-module mezon-go-sdk
+module mezon-sdk
 
 go 1.23.4
 
