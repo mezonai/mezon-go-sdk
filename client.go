@@ -1,56 +1,58 @@
 package client
 
 import (
-	"log"
-	"net"
+	"encoding/base64"
+	"fmt"
+	swagger "mezon-sdk/mezon-api"
 	"time"
-
-	"github.com/golang/protobuf/proto"
-	"github.com/johannesridho/protobuf-over-tcp/message"
 )
 
-func Authenticate() {
+var (
+	clientBasicAuth  *Client
+	clientBearerAuth *Client
+)
 
+type Config struct {
+	BasePath  string   `json:"base_path"`
+	ServerKey string   `json:"server_key"`
+	Timeout   int      `json:"timeout"`
+	Session   *Session `json:"session"`
 }
 
-func sendMessage(conn net.Conn) {
-	log.Println("client connected")
-
-	defer conn.Close()
-
-	messageProto := message.Message{Text: "Hello World", Timestamp: time.Now().Unix()}
-	data, err := proto.Marshal(&messageProto)
-	checkError(err)
-
-	length, err := conn.Write(data)
-	checkError(err)
-
-	log.Printf("Hello world sent, length %d bytes", length)
+type Client struct {
+	api *swagger.APIClient
 }
 
-func startClient() {
-	log.Println("starting tcp client")
+func newClient(c *Config, session bool) *Client {
+	cfg := swagger.NewConfiguration()
+	cfg.BasePath = c.BasePath
+	if c.Timeout == 0 {
+		c.Timeout = 15
+	}
+	cfg.HTTPClient.Timeout = time.Duration(c.Timeout) * time.Second
 
-	conn, err := net.Dial("tcp", "127.0.0.1:8080")
-	checkError(err)
+	if session {
+		// TODO: go ticker check session expire and renew token
+		// cfg.AddDefaultHeader("Authorization", "Bearer ")
+	} else {
+		cfg.AddDefaultHeader("Authorization", base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("Basic %s:", c.ServerKey))))
+	}
 
-	defer conn.Close()
-
-	data := make([]byte, 4096)
-	length, err := conn.Read(data)
-	checkError(err)
-
-	messagePb := message.Message{}
-	err = proto.Unmarshal(data[:length], &messagePb)
-	checkError(err)
-
-	log.Printf("received message: %s, timestamp: %v", messagePb.Text, messagePb.Timestamp)
-}
-
-func checkError(err error) {
-	if err != nil {
-		log.Println(err.Error())
+	return &Client{
+		api: swagger.NewAPIClient(cfg),
 	}
 }
 
-//go:generate protoc --go_out=. --go-grpc_out=. -I=./message ./message/message.proto
+func (c *Client) GetClientBasicAuth(cfg *Config) *swagger.MezonApiService {
+	if clientBasicAuth == nil {
+		clientBasicAuth = newClient(cfg, false)
+	}
+	return clientBasicAuth.api.MezonApi
+}
+
+func (c *Client) GetClientBearerAuth(cfg *Config) *swagger.MezonApiService {
+	if clientBearerAuth == nil {
+		clientBearerAuth = newClient(cfg, true)
+	}
+	return clientBearerAuth.api.MezonApi
+}
