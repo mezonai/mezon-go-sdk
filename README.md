@@ -1,6 +1,14 @@
 # Mezon go sdk
 
-A simple client-server mezon with golang
+🚀 A simple client-server mezon with golang
+
+## Status
+
+✅ Http client
+
+✅ Socket
+
+❌ WIP Webrtc
 
 ## Install
 
