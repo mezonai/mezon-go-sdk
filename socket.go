@@ -2,6 +2,7 @@ package client
 
 import (
 	"crypto/tls"
+	"fmt"
 	"log"
 	"mezon-sdk/constants"
 	"mezon-sdk/mezon-protobuf/mezon/v2/common/rtapi"
@@ -18,6 +19,7 @@ var (
 type WSConnection struct {
 	conn        *websocket.Conn
 	baseWS      string
+	token       string
 	clanId      string
 	recvHandler []func(*rtapi.Envelope) error
 }
@@ -28,11 +30,12 @@ type IWSConnection interface {
 	Close() error
 }
 
-func GetWSConnection(baseWS string, clanId string, recvHandler ...func(*rtapi.Envelope) error) (IWSConnection, error) {
+func GetWSConnection(baseWS string, token string, clanId string, recvHandler ...func(*rtapi.Envelope) error) (IWSConnection, error) {
 	if client == nil {
 		client = &WSConnection{
 			baseWS:      baseWS,
-			clanId:      baseWS,
+			token:       token,
+			clanId:      clanId,
 			recvHandler: recvHandler,
 		}
 		if err := client.newWSConnection(); err != nil {
@@ -54,13 +57,15 @@ func (s *WSConnection) newWSConnection() error {
 	dialer := websocket.Dialer{
 		TLSClientConfig: tlsConfig,
 	}
-	conn, _, err := dialer.Dial(s.baseWS, nil)
+	conn, _, err := dialer.Dial(fmt.Sprintf("%s/ws?lang=en&status=true&token=%s&format=protobuf", s.baseWS, s.token), nil)
 	if err != nil {
+		log.Println("WebSocket connection open err: ", err)
 		return err
 	}
 
 	client.conn = conn
 	if err = client.joinClan(s.clanId); err != nil {
+		log.Printf("WebSocket join clan: %s, err: %+v \n", s.clanId, err)
 		return err
 	}
 
