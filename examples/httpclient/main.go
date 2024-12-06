@@ -2,25 +2,31 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	mezonsdk "mezon-sdk"
+	swagger "mezon-sdk/mezon-api"
+
+	"github.com/antihax/optional"
 )
 
 func main() {
-	api := mezonsdk.GetClientBearerAuth(&mezonsdk.Config{
-		BasePath:     "https://dev-mezon.nccsoft.vn:7305",
-		Token:        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.xxxxx.824JrT9MxC7gS_iqDReMX4XBlWNtFcPOL5DnyN5cuuA",
+	api, err := mezonsdk.NewClientApi(&mezonsdk.Config{
+		BasePath: "dev-mezon.nccsoft.vn:7305",
+		// BasePath:     "api.mezon.vn",
+		ApiKey:       "7663586b61xxxxxxxx356a5a4d52",
 		Timeout:      10,
 		InsecureSkip: true,
-		Session:      nil,
+		UseSSL:       true,
 	})
 
-	if api == nil {
-		panic(errors.New("get http client api mezon is nil"))
+	if err != nil {
+		panic(err)
 	}
 
-	data, _, err := api.MezonGetAccount(context.Background())
+	data, _, err := api.MezonListChannelVoiceUsers(context.Background(), &swagger.MezonListChannelVoiceUsersOpts{
+		ClanId:      optional.NewString("1827955317304987648"),
+		ChannelType: optional.NewInt32(4),
+	})
 	if err != nil {
 		panic(err)
 	}

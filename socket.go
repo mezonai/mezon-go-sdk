@@ -4,21 +4,18 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log"
-	"mezon-sdk/constants"
 	"mezon-sdk/mezon-protobuf/mezon/v2/common/rtapi"
+	"mezon-sdk/utils"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/proto"
 )
 
-var (
-	client *WSConnection
-)
-
 type WSConnection struct {
 	conn        *websocket.Conn
-	baseWS      string
+	dialer      *websocket.Dialer
+	basePath    string
 	token       string
 	clanId      string
 	recvHandler []func(*rtapi.Envelope) error
@@ -30,48 +27,53 @@ type IWSConnection interface {
 	Close() error
 }
 
-func GetWSConnection(baseWS string, token string, clanId string, recvHandler ...func(*rtapi.Envelope) error) (IWSConnection, error) {
-	if client == nil {
-		client = &WSConnection{
-			baseWS:      baseWS,
-			token:       token,
-			clanId:      clanId,
-			recvHandler: recvHandler,
+func NewWSConnection(c *Config, clanId string, recvHandler ...func(*rtapi.Envelope) error) (IWSConnection, error) {
+	token, err := getTokenByApiKey(c)
+	if err != nil {
+		return nil, err
+	}
+
+	client := &WSConnection{
+		token:       token,
+		basePath:    utils.GetBasePath("ws", c.BasePath, c.UseSSL),
+		recvHandler: recvHandler,
+		clanId:      clanId,
+	}
+
+	if c.InsecureSkip {
+		tlsConfig := &tls.Config{
+			InsecureSkipVerify: true,
 		}
-		if err := client.newWSConnection(); err != nil {
-			return nil, err
+		client.dialer = &websocket.Dialer{
+			TLSClientConfig: tlsConfig,
 		}
+	} else {
+		client.dialer = websocket.DefaultDialer
+	}
+
+	if err := client.newWSConnection(); err != nil {
+		return nil, err
 	}
 
 	return client, nil
 }
 
 func (s *WSConnection) newWSConnection() error {
-	if s.baseWS == "" {
-		s.baseWS = constants.DefaultBaseWS
-	}
-
-	tlsConfig := &tls.Config{
-		InsecureSkipVerify: true,
-	}
-	dialer := websocket.Dialer{
-		TLSClientConfig: tlsConfig,
-	}
-	conn, _, err := dialer.Dial(fmt.Sprintf("%s/ws?lang=en&status=true&token=%s&format=protobuf", s.baseWS, s.token), nil)
+	conn, _, err := s.dialer.Dial(fmt.Sprintf("%s/ws?lang=en&status=true&token=%s&format=protobuf", s.basePath, s.token), nil)
 	if err != nil {
 		log.Println("WebSocket connection open err: ", err)
 		return err
 	}
 
-	client.conn = conn
-	if err = client.joinClan(s.clanId); err != nil {
+	s.conn = conn
+	if err = s.joinClan(s.clanId); err != nil {
 		log.Printf("WebSocket join clan: %s, err: %+v \n", s.clanId, err)
 		return err
 	}
 
-	client.reconnect()
-	client.pingPong()
-	client.recvMessage()
+	s.reconnect()
+	s.pingPong()
+	s.recvMessage()
 
 	return nil
 }

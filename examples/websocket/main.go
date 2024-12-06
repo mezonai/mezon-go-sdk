@@ -9,9 +9,14 @@ import (
 )
 
 func main() {
-	conn, err := mezonsdk.GetWSConnection("wss://dev-mezon.nccsoft.vn:7305",
-		"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.xxx.l_jOgFVmHZguGjAWG1h773auvrR5HMk4iamjd_xFA7g",
-		"1827987498463137792")
+	conn, err := mezonsdk.NewWSConnection(&mezonsdk.Config{
+		BasePath: "dev-mezon.nccsoft.vn:7305",
+		// BasePath:     "api.mezon.vn",
+		ApiKey:       "7663586b61xxxxxxxx356a5a4d52",
+		Timeout:      10,
+		InsecureSkip: true,
+		UseSSL:       true,
+	}, "1827955317304987648")
 	if err != nil {
 		panic(err)
 	}
@@ -31,10 +36,10 @@ func main() {
 	err = conn.SendMessage(&rtapi.Envelope{
 		Message: &rtapi.Envelope_ChannelMessageSend{
 			ChannelMessageSend: &rtapi.ChannelMessageSend{
-				ClanId:           "1827987498463137792",
-				ChannelId:        "1827987498479915008",
+				ClanId:           "1827955317304987648",
+				ChannelId:        "1827955317309181955",
 				Mode:             2,
-				Content:          "{\"t\":\"Ahihi\"}",
+				Content:          "{\"t\":\"Test test test\"}",
 				Mentions:         []*api.MessageMention{},
 				Attachments:      []*api.MessageAttachment{},
 				AnonymousMessage: false,
