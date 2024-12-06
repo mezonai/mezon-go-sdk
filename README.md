@@ -2,7 +2,9 @@
 
 A simple client-server mezon with golang
 
-#### Install
+## Install
+
+### protoc-gen-go
 
 ```shell
     go install \
@@ -12,6 +14,7 @@ A simple client-server mezon with golang
         "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2"
 ```
 
+### swagger-codegen
 <https://github.com/swagger-api/swagger-codegen>
 
 ```bash
@@ -21,7 +24,25 @@ A simple client-server mezon with golang
     chmod +x /usr/local/bin/swagger-codegen
 ```
 
-#### Generate code
+### GStreamer
+This example requires you have GStreamer installed, these are the supported platforms
+
+Debian/Ubuntu
+```bash
+    sudo apt-get install libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good
+```
+
+Windows MinGW64/MSYS2
+```bash
+    pacman -S mingw-w64-x86_64-gstreamer mingw-w64-x86_64-gst-libav mingw-w64-x86_64-gst-plugins-good mingw-w64-x86_64-gst-plugins-bad mingw-w64-x86_64-gst-plugins-ugly
+```
+
+macOS
+```bash
+    brew install gst-plugins-good gst-plugins-ugly pkg-config && export PKG_CONFIG_PATH="/usr/local/opt/libffi/lib/pkgconfig"
+```
+
+## Generate code
 
 ```bash
     cd mezon-protobuf

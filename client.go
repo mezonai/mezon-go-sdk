@@ -1,4 +1,4 @@
-package client
+package mezonsdk
 
 import (
 	"encoding/base64"
