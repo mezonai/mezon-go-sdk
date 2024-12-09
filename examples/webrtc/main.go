@@ -7,13 +7,26 @@ import (
 )
 
 func main() {
-	conn, err := mezonsdk.NewWSConnection(&mezonsdk.Config{}, "")
+	conn, err := mezonsdk.NewWSConnection(&mezonsdk.Config{
+		BasePath: "dev-mezon.nccsoft.vn:7305",
+		// BasePath:     "api.mezon.vn",
+		ApiKey:       "7663586b61xxxxxxxx356a5a4d52",
+		Timeout:      10,
+		InsecureSkip: true,
+		UseSSL:       true,
+	}, "1827955317304987648")
 	if err != nil {
 		panic(err)
 	}
 
 	filePath := ""
-	rtcConn, err := mezonsdk.NewRTCConnection(webrtc.Configuration{}, conn, "1827987498463137792", "1827987498463137792")
+	rtcConn, err := mezonsdk.NewRTCConnection(webrtc.Configuration{
+		ICEServers: []webrtc.ICEServer{
+			{
+				URLs: []string{"stun.l.google.com:19302"},
+			},
+		},
+	}, conn, "1827987498463137792", "1827987498463137792")
 	if err != nil {
 		panic(err)
 	}

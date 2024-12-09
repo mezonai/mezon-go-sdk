@@ -28,7 +28,7 @@ type IWSConnection interface {
 }
 
 func NewWSConnection(c *Config, clanId string, recvHandler ...func(*rtapi.Envelope) error) (IWSConnection, error) {
-	token, err := getTokenByApiKey(c)
+	token, err := getAuthenticate(c)
 	if err != nil {
 		return nil, err
 	}

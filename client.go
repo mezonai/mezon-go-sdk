@@ -16,7 +16,7 @@ type Client struct {
 }
 
 func NewClientApi(c *Config) (*swagger.MezonApiService, error) {
-	token, err := getTokenByApiKey(c)
+	token, err := getAuthenticate(c)
 	if err != nil {
 		return nil, err
 	}
@@ -28,7 +28,7 @@ func NewClientApi(c *Config) (*swagger.MezonApiService, error) {
 	}).api.MezonApi, nil
 }
 
-func getTokenByApiKey(c *Config) (string, error) {
+func getAuthenticate(c *Config) (string, error) {
 	cfg := getSwaggerConfig(c)
 
 	cfg.AddDefaultHeader("Authorization", base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("Basic %s:", c.ApiKey))))

@@ -23,6 +23,9 @@ type RTCConnection struct {
 	peer *webrtc.PeerConnection
 	ws   IWSConnection
 
+	clanId    string
+	channelId string
+
 	videoTrack *webrtc.TrackLocalStaticRTP
 	audioTrack *webrtc.TrackLocalStaticRTP
 }
@@ -36,9 +39,6 @@ func NewRTCConnection(config webrtc.Configuration, wsConn IWSConnection, clanId,
 	if err != nil {
 		return nil, err
 	}
-	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
-		fmt.Printf("Connection State has changed %s \n", connectionState.String())
-	})
 
 	// Create a video track
 	videoTrack, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8}, fmt.Sprintf("video_vp8_%s", channelId), fmt.Sprintf("video_vp8_%s", channelId))
@@ -62,11 +62,22 @@ func NewRTCConnection(config webrtc.Configuration, wsConn IWSConnection, clanId,
 
 	// save to store
 	rtcConnection := &RTCConnection{
-		peer: peerConnection,
-		ws:   wsConn,
+		peer:       peerConnection,
+		ws:         wsConn,
+		clanId:     clanId,
+		channelId:  channelId,
+		videoTrack: videoTrack,
+		audioTrack: audioTrack,
 	}
 	wsConn.SetRecvHandler(rtcConnection.onWebsocketEvent)
 	mapChannelRtcconnection.Store(channelId, rtcConnection)
+
+	peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+		onICEConnectionStateChange(state, channelId, clanId)
+	})
+	peerConnection.OnICECandidate(func(i *webrtc.ICECandidate) {
+		rtcConnection.onICECandidate(i, channelId, clanId)
+	})
 
 	// send offer
 	rtcConnection.sendOffer()
@@ -87,8 +98,8 @@ func (c *RTCConnection) SendFile(filePath string) error {
 
 func (c *RTCConnection) onWebsocketEvent(event *rtapi.Envelope) error {
 	switch event.Message.(type) {
-	case *rtapi.Envelope_JoinPttChannel:
-		eventData := event.GetJoinPttChannel()
+	case *rtapi.Envelope_JoinStreamingChannel:
+		eventData := event.GetJoinStreamingChannel()
 		switch eventData.DataType {
 		case constants.WEBRTC_SDP_ANSWER:
 			unzipData, _ := utils.GzipUncompress(eventData.JsonData)
@@ -127,19 +138,22 @@ func (c *RTCConnection) sendOffer() error {
 	byteJson, _ := json.Marshal(offer)
 	dataEnc, _ := utils.GzipCompress(string(byteJson))
 
-	//TODO: send ws , gzip compress data
+	// send socket signaling, gzip compress data
 	return c.ws.SendMessage(&rtapi.Envelope{
 		Cid: "",
-		Message: &rtapi.Envelope_JoinPttChannel{
-			JoinPttChannel: &rtapi.JoinPTTChannel{
-				JsonData: dataEnc,
-				DataType: constants.WEBRTC_SDP_OFFER,
+		Message: &rtapi.Envelope_JoinStreamingChannel{
+			JoinStreamingChannel: &rtapi.JoinStreamingChannel{
+				JsonData:      dataEnc,
+				DataType:      constants.WEBRTC_SDP_OFFER,
+				StreamingPush: true,
+				ClanId:        c.clanId,
+				ChannelId:     c.channelId,
 			},
 		},
 	})
 }
 
-func (c *RTCConnection) onICECandidate(i *webrtc.ICECandidate, channelId, userId string) error {
+func (c *RTCConnection) onICECandidate(i *webrtc.ICECandidate, clanId, channelId string) error {
 	if i == nil {
 		return nil
 	}
@@ -150,16 +164,39 @@ func (c *RTCConnection) onICECandidate(i *webrtc.ICECandidate, channelId, userId
 		return err
 	}
 
-	return c.ws.SendMessage(&rtapi.Envelope{Message: &rtapi.Envelope_JoinPttChannel{JoinPttChannel: &rtapi.JoinPTTChannel{
-		ReceiverId: userId,
-		DataType:   constants.WEBRTC_ICE_CANDIDATE,
-		JsonData:   string(candidateString),
-		ChannelId:  channelId,
+	return c.ws.SendMessage(&rtapi.Envelope{Message: &rtapi.Envelope_JoinStreamingChannel{JoinStreamingChannel: &rtapi.JoinStreamingChannel{
+		DataType:      constants.WEBRTC_ICE_CANDIDATE,
+		JsonData:      string(candidateString),
+		ChannelId:     channelId,
+		ClanId:        clanId,
+		StreamingPush: true,
 	}}})
 }
 
 func (c *RTCConnection) addICECandidate(i webrtc.ICECandidateInit) error {
 	return c.peer.AddICECandidate(i)
+}
+
+func onICEConnectionStateChange(state webrtc.ICEConnectionState, clanId, channelId string) {
+	log.Printf("Connection State has changed %s \n", state.String())
+
+	switch state {
+	case webrtc.ICEConnectionStateClosed:
+		rtcConn, ok := mapChannelRtcconnection.Load(channelId)
+		if !ok {
+			return
+		}
+
+		if rtcConn.(RTCConnection).peer == nil {
+			return
+		}
+
+		if rtcConn.(RTCConnection).peer.ConnectionState() != webrtc.PeerConnectionStateClosed {
+			rtcConn.(RTCConnection).peer.Close()
+		}
+
+		mapChannelRtcconnection.Delete(channelId)
+	}
 }
 
 // Create the appropriate GStreamer pipeline depending on what codec we are working with
