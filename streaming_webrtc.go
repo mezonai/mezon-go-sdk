@@ -32,6 +32,7 @@ type streamingRTCConn struct {
 
 type IStreamingRTCConnection interface {
 	SendFile(filePath string) error
+	Close(channelId string)
 }
 
 func NewStreamingRTCConnection(config webrtc.Configuration, wsConn IWSConnection, clanId, channelId string) (IStreamingRTCConnection, error) {
@@ -114,6 +115,23 @@ func (c *streamingRTCConn) SendFile(filePath string) error {
 	c.pipelineForCodec("vp8", []*webrtc.TrackLocalStaticRTP{c.videoTrack}, videoSrc)
 
 	return nil
+}
+
+func (c *streamingRTCConn) Close(channelId string) {
+	rtcConn, ok := mapStreamingRtcConn.Load(channelId)
+	if !ok {
+		return
+	}
+
+	if rtcConn.(*streamingRTCConn).peer == nil {
+		return
+	}
+
+	if rtcConn.(*streamingRTCConn).peer.ConnectionState() != webrtc.PeerConnectionStateClosed {
+		rtcConn.(*streamingRTCConn).peer.Close()
+	}
+
+	mapStreamingRtcConn.Delete(channelId)
 }
 
 func (c *streamingRTCConn) onWebsocketEvent(event *rtapi.Envelope) error {
