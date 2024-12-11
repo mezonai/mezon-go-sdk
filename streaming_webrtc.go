@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	mapChannelRtcConn sync.Map // map[channelId]*RTCConnection
+	mapStreamingRtcConn sync.Map // map[channelId]*RTCConnection
 )
 
 type streamingRTCConn struct {
@@ -70,10 +70,30 @@ func NewStreamingRTCConnection(config webrtc.Configuration, wsConn IWSConnection
 		audioTrack: audioTrack,
 	}
 	wsConn.SetOnJoinStreamingChannel(rtcConnection.onWebsocketEvent)
-	mapChannelRtcConn.Store(channelId, rtcConnection)
+	mapStreamingRtcConn.Store(channelId, rtcConnection)
 
 	peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-		onStreamingICEConnectionStateChange(state, channelId)
+		log.Printf("Connection State has changed %s \n", state.String())
+
+		switch state {
+		case webrtc.ICEConnectionStateConnected:
+			// TODO: event ice connected
+		case webrtc.ICEConnectionStateClosed:
+			rtcConn, ok := mapStreamingRtcConn.Load(channelId)
+			if !ok {
+				return
+			}
+
+			if rtcConn.(*streamingRTCConn).peer == nil {
+				return
+			}
+
+			if rtcConn.(*streamingRTCConn).peer.ConnectionState() != webrtc.PeerConnectionStateClosed {
+				rtcConn.(*streamingRTCConn).peer.Close()
+			}
+
+			mapStreamingRtcConn.Delete(channelId)
+		}
 	})
 	peerConnection.OnICECandidate(func(i *webrtc.ICECandidate) {
 		rtcConnection.onICECandidate(i, channelId, clanId)
@@ -175,28 +195,6 @@ func (c *streamingRTCConn) onICECandidate(i *webrtc.ICECandidate, clanId, channe
 
 func (c *streamingRTCConn) addICECandidate(i webrtc.ICECandidateInit) error {
 	return c.peer.AddICECandidate(i)
-}
-
-func onStreamingICEConnectionStateChange(state webrtc.ICEConnectionState, channelId string) {
-	log.Printf("Connection State has changed %s \n", state.String())
-
-	switch state {
-	case webrtc.ICEConnectionStateClosed:
-		rtcConn, ok := mapChannelRtcConn.Load(channelId)
-		if !ok {
-			return
-		}
-
-		if rtcConn.(*streamingRTCConn).peer == nil {
-			return
-		}
-
-		if rtcConn.(*streamingRTCConn).peer.ConnectionState() != webrtc.PeerConnectionStateClosed {
-			rtcConn.(*streamingRTCConn).peer.Close()
-		}
-
-		mapChannelRtcConn.Delete(channelId)
-	}
 }
 
 // Create the appropriate GStreamer pipeline depending on what codec we are working with
