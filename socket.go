@@ -12,32 +12,45 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+func recvDefaultHandler(e *rtapi.Envelope) error {
+	return nil
+}
+
 type WSConnection struct {
-	conn        *websocket.Conn
-	dialer      *websocket.Dialer
-	basePath    string
-	token       string
-	clanId      string
-	recvHandler []func(*rtapi.Envelope) error
+	conn                   *websocket.Conn
+	dialer                 *websocket.Dialer
+	basePath               string
+	token                  string
+	clanId                 string
+	onJoinStreamingChannel func(*rtapi.Envelope) error
+	onWebrtcSignalingFwd   func(*rtapi.Envelope) error
+	onPong                 func(*rtapi.Envelope) error
+	onChannelMessageSend   func(*rtapi.Envelope) error
 }
 
 type IWSConnection interface {
 	SendMessage(data *rtapi.Envelope) error
-	SetRecvHandler(recvHandler func(*rtapi.Envelope) error)
+	SetOnJoinStreamingChannel(recvHandler func(*rtapi.Envelope) error)
+	SetOnWebrtcSignalingFwd(recvHandler func(*rtapi.Envelope) error)
+	SetOnPong(recvHandler func(*rtapi.Envelope) error)
+	SetOnChannelMessageSend(recvHandler func(*rtapi.Envelope) error)
 	Close() error
 }
 
-func NewWSConnection(c *Config, clanId string, recvHandler ...func(*rtapi.Envelope) error) (IWSConnection, error) {
+func NewWSConnection(c *Config, clanId string) (IWSConnection, error) {
 	token, err := getAuthenticate(c)
 	if err != nil {
 		return nil, err
 	}
 
 	client := &WSConnection{
-		token:       token,
-		basePath:    utils.GetBasePath("ws", c.BasePath, c.UseSSL),
-		recvHandler: recvHandler,
-		clanId:      clanId,
+		token:                  token,
+		basePath:               utils.GetBasePath("ws", c.BasePath, c.UseSSL),
+		clanId:                 clanId,
+		onJoinStreamingChannel: recvDefaultHandler,
+		onWebrtcSignalingFwd:   recvDefaultHandler,
+		onPong:                 recvDefaultHandler,
+		onChannelMessageSend:   recvDefaultHandler,
 	}
 
 	if c.InsecureSkip {
@@ -88,10 +101,6 @@ func (s *WSConnection) SendMessage(data *rtapi.Envelope) error {
 		return err
 	}
 	return s.conn.WriteMessage(websocket.BinaryMessage, jsonData)
-}
-
-func (s *WSConnection) SetRecvHandler(recvHandler func(*rtapi.Envelope) error) {
-	s.recvHandler = append(s.recvHandler, recvHandler)
 }
 
 func (s *WSConnection) joinClan(clanId string) error {
@@ -168,12 +177,36 @@ func (s *WSConnection) recvMessage() {
 				continue
 			}
 
-			for _, handler := range s.recvHandler {
-				err = handler(request)
-				if err != nil {
-					continue
-				}
+			if request.Cid != "" {
+				continue
+			}
+
+			switch request.Message.(type) {
+			case *rtapi.Envelope_JoinStreamingChannel:
+				s.onJoinStreamingChannel(request)
+			case *rtapi.Envelope_WebrtcSignalingFwd:
+				s.onWebrtcSignalingFwd(request)
+			case *rtapi.Envelope_Pong:
+				s.onPong(request)
+			case *rtapi.Envelope_ChannelMessageSend:
+				s.onChannelMessageSend(request)
 			}
 		}
 	}()
+}
+
+func (s *WSConnection) SetOnJoinStreamingChannel(recvHandler func(*rtapi.Envelope) error) {
+	s.onJoinStreamingChannel = recvHandler
+}
+
+func (s *WSConnection) SetOnWebrtcSignalingFwd(recvHandler func(*rtapi.Envelope) error) {
+	s.onWebrtcSignalingFwd = recvHandler
+}
+
+func (s *WSConnection) SetOnPong(recvHandler func(*rtapi.Envelope) error) {
+	s.onPong = recvHandler
+}
+
+func (s *WSConnection) SetOnChannelMessageSend(recvHandler func(*rtapi.Envelope) error) {
+	s.onChannelMessageSend = recvHandler
 }

@@ -16,10 +16,10 @@ import (
 )
 
 var (
-	mapChannelRtcconnection sync.Map // map[channelId]*RTCConnection
+	mapChannelRtcConn sync.Map // map[channelId]*RTCConnection
 )
 
-type RTCConnection struct {
+type streamingRTCConn struct {
 	peer *webrtc.PeerConnection
 	ws   IWSConnection
 
@@ -30,11 +30,11 @@ type RTCConnection struct {
 	audioTrack *webrtc.TrackLocalStaticRTP
 }
 
-type IRTCConnection interface {
+type IStreamingRTCConnection interface {
 	SendFile(filePath string) error
 }
 
-func NewRTCConnection(config webrtc.Configuration, wsConn IWSConnection, clanId, channelId string) (IRTCConnection, error) {
+func NewStreamingRTCConnection(config webrtc.Configuration, wsConn IWSConnection, clanId, channelId string) (IStreamingRTCConnection, error) {
 	peerConnection, err := webrtc.NewPeerConnection(config)
 	if err != nil {
 		return nil, err
@@ -61,7 +61,7 @@ func NewRTCConnection(config webrtc.Configuration, wsConn IWSConnection, clanId,
 	}
 
 	// save to store
-	rtcConnection := &RTCConnection{
+	rtcConnection := &streamingRTCConn{
 		peer:       peerConnection,
 		ws:         wsConn,
 		clanId:     clanId,
@@ -69,11 +69,11 @@ func NewRTCConnection(config webrtc.Configuration, wsConn IWSConnection, clanId,
 		videoTrack: videoTrack,
 		audioTrack: audioTrack,
 	}
-	wsConn.SetRecvHandler(rtcConnection.onWebsocketEvent)
-	mapChannelRtcconnection.Store(channelId, rtcConnection)
+	wsConn.SetOnJoinStreamingChannel(rtcConnection.onWebsocketEvent)
+	mapChannelRtcConn.Store(channelId, rtcConnection)
 
 	peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-		onICEConnectionStateChange(state, channelId, clanId)
+		onStreamingICEConnectionStateChange(state, channelId)
 	})
 	peerConnection.OnICECandidate(func(i *webrtc.ICECandidate) {
 		rtcConnection.onICECandidate(i, channelId, clanId)
@@ -85,7 +85,7 @@ func NewRTCConnection(config webrtc.Configuration, wsConn IWSConnection, clanId,
 	return rtcConnection, nil
 }
 
-func (c *RTCConnection) SendFile(filePath string) error {
+func (c *streamingRTCConn) SendFile(filePath string) error {
 	// Start pushing buffers on these tracks
 	audioSrc := fmt.Sprintf("uridecodebin uri=%s ! queue ! audioconvert", filePath)
 	videoSrc := fmt.Sprintf("uridecodebin uri=%s ! videoscale ! video/x-raw, width=320, height=240 ! queue ", filePath)
@@ -96,7 +96,7 @@ func (c *RTCConnection) SendFile(filePath string) error {
 	return nil
 }
 
-func (c *RTCConnection) onWebsocketEvent(event *rtapi.Envelope) error {
+func (c *streamingRTCConn) onWebsocketEvent(event *rtapi.Envelope) error {
 	switch event.Message.(type) {
 	case *rtapi.Envelope_JoinStreamingChannel:
 		eventData := event.GetJoinStreamingChannel()
@@ -126,7 +126,7 @@ func (c *RTCConnection) onWebsocketEvent(event *rtapi.Envelope) error {
 	return nil
 }
 
-func (c *RTCConnection) sendOffer() error {
+func (c *streamingRTCConn) sendOffer() error {
 	offer, err := c.peer.CreateOffer(nil)
 	if err != nil {
 		return err
@@ -153,7 +153,7 @@ func (c *RTCConnection) sendOffer() error {
 	})
 }
 
-func (c *RTCConnection) onICECandidate(i *webrtc.ICECandidate, clanId, channelId string) error {
+func (c *streamingRTCConn) onICECandidate(i *webrtc.ICECandidate, clanId, channelId string) error {
 	if i == nil {
 		return nil
 	}
@@ -173,34 +173,34 @@ func (c *RTCConnection) onICECandidate(i *webrtc.ICECandidate, clanId, channelId
 	}}})
 }
 
-func (c *RTCConnection) addICECandidate(i webrtc.ICECandidateInit) error {
+func (c *streamingRTCConn) addICECandidate(i webrtc.ICECandidateInit) error {
 	return c.peer.AddICECandidate(i)
 }
 
-func onICEConnectionStateChange(state webrtc.ICEConnectionState, clanId, channelId string) {
+func onStreamingICEConnectionStateChange(state webrtc.ICEConnectionState, channelId string) {
 	log.Printf("Connection State has changed %s \n", state.String())
 
 	switch state {
 	case webrtc.ICEConnectionStateClosed:
-		rtcConn, ok := mapChannelRtcconnection.Load(channelId)
+		rtcConn, ok := mapChannelRtcConn.Load(channelId)
 		if !ok {
 			return
 		}
 
-		if rtcConn.(RTCConnection).peer == nil {
+		if rtcConn.(*streamingRTCConn).peer == nil {
 			return
 		}
 
-		if rtcConn.(RTCConnection).peer.ConnectionState() != webrtc.PeerConnectionStateClosed {
-			rtcConn.(RTCConnection).peer.Close()
+		if rtcConn.(*streamingRTCConn).peer.ConnectionState() != webrtc.PeerConnectionStateClosed {
+			rtcConn.(*streamingRTCConn).peer.Close()
 		}
 
-		mapChannelRtcconnection.Delete(channelId)
+		mapChannelRtcConn.Delete(channelId)
 	}
 }
 
 // Create the appropriate GStreamer pipeline depending on what codec we are working with
-func (c *RTCConnection) pipelineForCodec(codecName string, tracks []*webrtc.TrackLocalStaticRTP, pipelineSrc string) {
+func (c *streamingRTCConn) pipelineForCodec(codecName string, tracks []*webrtc.TrackLocalStaticRTP, pipelineSrc string) {
 	pipelineStr := "appsink name=appsink"
 	switch codecName {
 	case "vp8":
@@ -215,6 +215,8 @@ func (c *RTCConnection) pipelineForCodec(codecName string, tracks []*webrtc.Trac
 		pipelineStr = pipelineSrc + " ! audio/x-raw, rate=8000 ! mulawenc ! " + pipelineStr
 	case "pcma":
 		pipelineStr = pipelineSrc + " ! audio/x-raw, rate=8000 ! alawenc ! " + pipelineStr
+	case "mp3":
+		pipelineStr = pipelineSrc + " ! audioresample ! audio/x-raw,rate=48000 ! opusenc ! rtpopuspay ! " + pipelineStr
 	default:
 		log.Println("Unhandled codec " + codecName)
 		return
