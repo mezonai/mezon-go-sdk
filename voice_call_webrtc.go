@@ -33,15 +33,17 @@ type callRTCConn struct {
 	receiverId string
 	callerId   string
 
-	audioTrack *webrtc.TrackLocalStaticRTP
-	pathImage  string
+	audioTrack    *webrtc.TrackLocalStaticRTP
+	pathImage     string
+	timeSaveImage int
 }
 
 type callService struct {
-	botId     string
-	ws        IWSConnection
-	config    webrtc.Configuration
-	pathImage string
+	botId         string
+	ws            IWSConnection
+	config        webrtc.Configuration
+	pathImage     string
+	timeSaveImage int
 }
 
 type ICallService interface {
@@ -50,12 +52,13 @@ type ICallService interface {
 	GetRTCConnectionState(channelId string) webrtc.PeerConnectionState
 }
 
-func NewCallService(botId string, wsConn IWSConnection, config webrtc.Configuration, pathImage string) ICallService {
+func NewCallService(botId string, wsConn IWSConnection, config webrtc.Configuration, pathImage string, timeSaveImage int) ICallService {
 	return &callService{
-		botId:     botId,
-		ws:        wsConn,
-		config:    config,
-		pathImage: pathImage,
+		botId:         botId,
+		ws:            wsConn,
+		config:        config,
+		pathImage:     pathImage,
+		timeSaveImage: timeSaveImage,
 	}
 }
 
@@ -78,12 +81,13 @@ func (c *callService) newCallRTCConnection(channelId, receiverId string) (*callR
 
 	// save to store
 	rtcConnection := &callRTCConn{
-		peer:       peerConnection,
-		channelId:  channelId,
-		receiverId: receiverId,
-		callerId:   c.botId,
-		audioTrack: audioTrack,
-		pathImage:  c.pathImage,
+		peer:          peerConnection,
+		channelId:     channelId,
+		receiverId:    receiverId,
+		callerId:      c.botId,
+		audioTrack:    audioTrack,
+		pathImage:     c.pathImage,
+		timeSaveImage: c.timeSaveImage,
 	}
 	mapCallRtcConn.Store(channelId, rtcConnection)
 
@@ -94,9 +98,10 @@ func (c *callService) newCallRTCConnection(channelId, receiverId string) (*callR
 		c.onICECandidate(i, channelId, c.botId, receiverId)
 	})
 
-	peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) { //nolint: revive
-		kind := track.Kind().String()
-		if strings.EqualFold(kind, string(webrtc.MediaKindVideo)) {
+	peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+
+		// save image by time receive track
+		if rtcConnection.timeSaveImage > 0 && strings.EqualFold(track.Kind().String(), string(webrtc.MediaKindVideo)) {
 			rtcConnection.saveTrackToImage(receiverId, track)
 		}
 	})
@@ -313,7 +318,7 @@ func (c *callRTCConn) pipelineForCodec(codecName string, tracks []*webrtc.TrackL
 }
 
 func (c *callRTCConn) saveTrackToImage(receiverId string, track *webrtc.TrackRemote) error {
-	log.Printf("[saveTrackToImage] codec: %s \n", track.Codec().MimeType)
+	log.Printf("[saveTrackToImage] receiverId: %s, codec: %s \n", receiverId, track.Codec().MimeType)
 
 	currentDate := time.Now().Format("2006-01-02")
 	currentTime := time.Now().Format("150405")
@@ -347,21 +352,18 @@ func (c *callRTCConn) saveTrackToImage(receiverId string, track *webrtc.TrackRem
 	for {
 		rtpPacket, _, err := track.ReadRTP()
 		if err != nil {
-			log.Println("ReadRTP: ", err)
 			return err
 		}
 
 		if len(rtpPacket.Payload) == 0 {
-			log.Println("Skipping empty RTP packet")
 			continue
 		}
 
 		if err := ivfFile.WriteRTP(rtpPacket); err != nil {
-			log.Println("WriteRTP: ", err)
 			return err
 		}
 
-		if time.Since(startTime) > 10*time.Second {
+		if time.Since(startTime) > time.Duration(c.timeSaveImage)*time.Second {
 			break
 		}
 	}
@@ -374,7 +376,10 @@ func (c *callRTCConn) saveTrackToImage(receiverId string, track *webrtc.TrackRem
 		return err
 	}
 
-	pipeline.SetState(gst.StatePlaying)
+	if err := pipeline.SetState(gst.StatePlaying); err != nil {
+		log.Println("[saveTrackToImage] gst error: ", err.Error())
+		return err
+	}
 
 	bus := pipeline.GetPipelineBus()
 	for {
@@ -385,11 +390,10 @@ func (c *callRTCConn) saveTrackToImage(receiverId string, track *webrtc.TrackRem
 		switch msg.Type() {
 		case gst.MessageEOS:
 			pipeline.SetState(gst.StateNull)
-			os.Remove("")
 			return nil
 		case gst.MessageError:
 			err := msg.ParseError()
-			fmt.Println("Pipeline error:", err)
+			log.Println("[saveTrackToImage] gst error: ", err.Message())
 			pipeline.SetState(gst.StateNull)
 			return err
 		}
