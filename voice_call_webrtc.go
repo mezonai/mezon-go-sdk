@@ -2,13 +2,12 @@ package mezonsdk
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"image/jpeg"
 	"log"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -39,18 +38,17 @@ type callRTCConn struct {
 	receiverId string
 	callerId   string
 
-	audioTrack    *webrtc.TrackLocalStaticRTP
-	rtpChan       chan *rtp.Packet
-	pathImage     string
-	timeSaveImage int
+	audioTrack     *webrtc.TrackLocalStaticRTP
+	rtpChan        chan *rtp.Packet
+	snapShootCount int
 }
 
 type callService struct {
-	botId         string
-	ws            IWSConnection
-	config        webrtc.Configuration
-	pathImage     string
-	timeSaveImage int
+	botId          string
+	ws             IWSConnection
+	config         webrtc.Configuration
+	snapShootCount int
+	onImage        func(imgBase64 string) error
 }
 
 type ICallService interface {
@@ -59,13 +57,13 @@ type ICallService interface {
 	GetRTCConnectionState(channelId string) webrtc.PeerConnectionState
 }
 
-func NewCallService(botId string, wsConn IWSConnection, config webrtc.Configuration, pathImage string, timeSaveImage int) ICallService {
+func NewCallService(botId string, wsConn IWSConnection, config webrtc.Configuration, onImage func(imgBase64 string) error, snapShootCount int) ICallService {
 	return &callService{
-		botId:         botId,
-		ws:            wsConn,
-		config:        config,
-		pathImage:     pathImage,
-		timeSaveImage: timeSaveImage,
+		botId:          botId,
+		ws:             wsConn,
+		config:         config,
+		snapShootCount: snapShootCount,
+		onImage:        onImage,
 	}
 }
 
@@ -77,30 +75,29 @@ func (c *callService) newCallRTCConnection(channelId, receiverId string) (*callR
 	}
 
 	// Create a audio track
-	audioTrack, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus}, fmt.Sprintf("audio_opus_%s", channelId), fmt.Sprintf("audio_opus_%s", channelId))
-	if err != nil {
-		return nil, err
-	}
-	_, err = peerConnection.AddTrack(audioTrack)
-	if err != nil {
-		return nil, err
-	}
+	// audioTrack, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus}, fmt.Sprintf("audio_opus_%s", channelId), fmt.Sprintf("audio_opus_%s", channelId))
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// _, err = peerConnection.AddTrack(audioTrack)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
 	// save to store
 	rtcConnection := &callRTCConn{
-		peer:          peerConnection,
-		channelId:     channelId,
-		receiverId:    receiverId,
-		callerId:      c.botId,
-		audioTrack:    audioTrack,
-		pathImage:     c.pathImage,
-		timeSaveImage: c.timeSaveImage,
-		rtpChan:       make(chan *rtp.Packet),
+		peer:       peerConnection,
+		channelId:  channelId,
+		receiverId: receiverId,
+		callerId:   c.botId,
+		// audioTrack:     audioTrack,
+		snapShootCount: c.snapShootCount,
+		rtpChan:        make(chan *rtp.Packet),
 	}
 	mapCallRtcConn.Store(channelId, rtcConnection)
 
 	peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-		c.onICEConnectionStateChange(state, channelId)
+		c.onICEConnectionStateChange(state, channelId, receiverId)
 	})
 	peerConnection.OnICECandidate(func(i *webrtc.ICECandidate) {
 		c.onICECandidate(i, channelId, c.botId, receiverId)
@@ -109,7 +106,7 @@ func (c *callService) newCallRTCConnection(channelId, receiverId string) (*callR
 	peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 
 		// save image by time receive track
-		if rtcConnection.timeSaveImage > 0 && track.Kind() == webrtc.RTPCodecTypeVideo {
+		if rtcConnection.snapShootCount > 0 && track.Kind() == webrtc.RTPCodecTypeVideo {
 			// Send a PLI on an interval so that the publisher is pushing a keyframe every rtcpPLIInterval
 			go func() {
 				ticker := time.NewTicker(time.Second * 3)
@@ -121,17 +118,12 @@ func (c *callService) newCallRTCConnection(channelId, receiverId string) (*callR
 				}
 			}()
 
-			startTime := time.Now()
 			for {
 				// Read RTP Packets in a loop
 				rtpPacket, _, readErr := track.ReadRTP()
 				if readErr != nil {
 					log.Printf("track read rtp error: %+v \n", readErr)
 					return
-				}
-
-				if time.Since(startTime) > time.Duration(c.timeSaveImage)*time.Second {
-					break
 				}
 
 				// Use a lossy channel to send packets to snapshot handler
@@ -143,8 +135,6 @@ func (c *callService) newCallRTCConnection(channelId, receiverId string) (*callR
 			}
 		}
 	})
-
-	go rtcConnection.saveTrackToImage(receiverId)
 
 	return rtcConnection, nil
 }
@@ -249,21 +239,23 @@ func (c *callService) onICECandidate(i *webrtc.ICECandidate, channelId, callerId
 	}}})
 }
 
-func (c *callService) onICEConnectionStateChange(state webrtc.ICEConnectionState, channelId string) {
+func (c *callService) onICEConnectionStateChange(state webrtc.ICEConnectionState, channelId, receiverId string) {
 	log.Printf("Connection State has changed %s \n", state.String())
+
+	rtcConn, ok := mapCallRtcConn.Load(channelId)
+	if !ok {
+		return
+	}
+
+	if rtcConn.(*callRTCConn).peer == nil {
+		return
+	}
 
 	switch state {
 	case webrtc.ICEConnectionStateConnected:
+		rtcConn.(*callRTCConn).saveTrackToImage(c.onImage, receiverId)
 
 	case webrtc.ICEConnectionStateClosed:
-		rtcConn, ok := mapCallRtcConn.Load(channelId)
-		if !ok {
-			return
-		}
-
-		if rtcConn.(*callRTCConn).peer == nil {
-			return
-		}
 
 		if rtcConn.(*callRTCConn).peer.ConnectionState() != webrtc.PeerConnectionStateClosed {
 			rtcConn.(*callRTCConn).peer.Close()
@@ -357,21 +349,15 @@ func (c *callRTCConn) pipelineForCodec(codecName string, tracks []*webrtc.TrackL
 	})
 }
 
-func (c *callRTCConn) saveTrackToImage(receiverId string) error {
+func (c *callRTCConn) saveTrackToImage(onImage func(imgBase64 string) error, receiverId string) error {
 	log.Printf("[saveTrackToImage] receiverId: %s \n", receiverId)
 
-	currentDate := time.Now().Format("2006-01-02")
-	currentTime := time.Now().Format("150405")
-	folderPath := filepath.Join(".", c.pathImage, currentDate)
-	if err := os.MkdirAll(folderPath, os.ModePerm); err != nil {
-		return err
-	}
-
-	imagePath := filepath.Join(folderPath, fmt.Sprintf("%s_%s.jpg", currentTime, receiverId))
+	imageCount := 1
 	sampleBuilder := samplebuilder.New(20, &codecs.VP8Packet{}, 90000)
 	decoder := vp8.NewDecoder()
 
 	for {
+
 		// Pull RTP Packet from rtpChan
 		sampleBuilder.Push(<-c.rtpChan)
 
@@ -403,17 +389,33 @@ func (c *callRTCConn) saveTrackToImage(receiverId string) error {
 			return err
 		}
 
-		file, err := os.Create(imagePath)
-		if err != nil {
-			log.Printf("failed to create image file: %+v \n", err)
-			return fmt.Errorf("failed to create image file: %w", err)
-		}
+		// Log the image size to check resolution
+		// log.Printf("Decoded image size: width=%d, height=%d", img.Bounds().Dx(), img.Bounds().Dy())
 
 		// Encode to (RGB) jpeg
-		if err = jpeg.Encode(file, img, nil); err != nil {
+		buffer := new(bytes.Buffer)
+		if err = jpeg.Encode(buffer, img, nil); err != nil {
 			log.Printf("jpeg.Encode error: %+v \n", err)
+			continue
+		}
+
+		// // Convert JPEG bytes to Base64
+		base64Image := base64.StdEncoding.EncodeToString(buffer.Bytes())
+		imageCount++
+
+		// log.Printf("Generated Base64 for image %s", base64Image)
+		if err := onImage(base64Image); err != nil {
 			return err
 		}
-		file.Close()
+
+		sampleBuilder = samplebuilder.New(20, &codecs.VP8Packet{}, 90000)
+		decoder = vp8.NewDecoder()
+
+		if imageCount > c.snapShootCount {
+			close(c.rtpChan)
+			c.peer.Close()
+
+			return nil
+		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/nccasia/mezon-go-sdk/utils"
@@ -24,6 +25,7 @@ type WSConnection struct {
 	basePath               string
 	token                  string
 	clanId                 string
+	mu                     sync.Mutex
 	onJoinStreamingChannel func(*rtapi.Envelope) error
 	onWebrtcSignalingFwd   func(*rtapi.Envelope) error
 	onPong                 func(*rtapi.Envelope) error
@@ -98,10 +100,14 @@ func (s *WSConnection) Close() error {
 }
 
 func (s *WSConnection) SendMessage(data *rtapi.Envelope) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	jsonData, err := proto.Marshal(data)
 	if err != nil {
 		return err
 	}
+
 	return s.conn.WriteMessage(websocket.BinaryMessage, jsonData)
 }
 
