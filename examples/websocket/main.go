@@ -29,6 +29,11 @@ func main() {
 
 	time.Sleep(1 * time.Second)
 
+	conn.SetOnChannelMessage(func(e *rtapi.Envelope) error {
+		fmt.Printf("messages => cid: %s, message: %+v \n", e.Cid, e.GetChannelMessage())
+		return nil
+	})
+
 	err = conn.SendMessage(&rtapi.Envelope{
 		Message: &rtapi.Envelope_ChannelMessageSend{
 			ChannelMessageSend: &rtapi.ChannelMessageSend{

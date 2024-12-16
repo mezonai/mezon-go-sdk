@@ -27,7 +27,7 @@ type WSConnection struct {
 	onJoinStreamingChannel func(*rtapi.Envelope) error
 	onWebrtcSignalingFwd   func(*rtapi.Envelope) error
 	onPong                 func(*rtapi.Envelope) error
-	onChannelMessageSend   func(*rtapi.Envelope) error
+	onChannelMessage       func(*rtapi.Envelope) error
 }
 
 type IWSConnection interface {
@@ -35,7 +35,7 @@ type IWSConnection interface {
 	SetOnJoinStreamingChannel(recvHandler func(*rtapi.Envelope) error)
 	SetOnWebrtcSignalingFwd(recvHandler func(*rtapi.Envelope) error)
 	SetOnPong(recvHandler func(*rtapi.Envelope) error)
-	SetOnChannelMessageSend(recvHandler func(*rtapi.Envelope) error)
+	SetOnChannelMessage(recvHandler func(*rtapi.Envelope) error)
 	Close() error
 }
 
@@ -52,7 +52,7 @@ func NewWSConnection(c *Config, clanId string) (IWSConnection, error) {
 		onJoinStreamingChannel: recvDefaultHandler,
 		onWebrtcSignalingFwd:   recvDefaultHandler,
 		onPong:                 recvDefaultHandler,
-		onChannelMessageSend:   recvDefaultHandler,
+		onChannelMessage:       recvDefaultHandler,
 	}
 
 	if c.InsecureSkip {
@@ -190,8 +190,8 @@ func (s *WSConnection) recvMessage() {
 				s.onWebrtcSignalingFwd(request)
 			case *rtapi.Envelope_Pong:
 				s.onPong(request)
-			case *rtapi.Envelope_ChannelMessageSend:
-				s.onChannelMessageSend(request)
+			case *rtapi.Envelope_ChannelMessage:
+				s.onChannelMessage(request)
 			}
 		}
 	}()
@@ -209,6 +209,6 @@ func (s *WSConnection) SetOnPong(recvHandler func(*rtapi.Envelope) error) {
 	s.onPong = recvHandler
 }
 
-func (s *WSConnection) SetOnChannelMessageSend(recvHandler func(*rtapi.Envelope) error) {
-	s.onChannelMessageSend = recvHandler
+func (s *WSConnection) SetOnChannelMessage(recvHandler func(*rtapi.Envelope) error) {
+	s.onChannelMessage = recvHandler
 }
