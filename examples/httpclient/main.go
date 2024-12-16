@@ -3,8 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
-	mezonsdk "mezon-go-sdk"
-	swagger "mezon-go-sdk/mezon-api"
+
+	mezonsdk "github.com/nccasia/mezon-go-sdk"
+	swagger "github.com/nccasia/mezon-go-sdk/mezon-api"
 
 	"github.com/antihax/optional"
 )

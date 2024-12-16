@@ -2,10 +2,11 @@ package main
 
 import (
 	"fmt"
-	mezonsdk "mezon-go-sdk"
-	"mezon-go-sdk/mezon-protobuf/mezon/v2/common/api"
-	"mezon-go-sdk/mezon-protobuf/mezon/v2/common/rtapi"
 	"time"
+
+	mezonsdk "github.com/nccasia/mezon-go-sdk"
+	"github.com/nccasia/mezon-go-sdk/mezon-protobuf/mezon/v2/common/api"
+	"github.com/nccasia/mezon-go-sdk/mezon-protobuf/mezon/v2/common/rtapi"
 )
 
 func main() {

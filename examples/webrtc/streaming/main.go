@@ -1,7 +1,7 @@
 package main
 
 import (
-	mezonsdk "mezon-go-sdk"
+	mezonsdk "github.com/nccasia/mezon-go-sdk"
 
 	"github.com/pion/webrtc/v4"
 )

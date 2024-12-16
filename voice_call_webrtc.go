@@ -7,13 +7,14 @@ import (
 	"fmt"
 	"image/jpeg"
 	"log"
-	"mezon-go-sdk/constants"
-	"mezon-go-sdk/mezon-protobuf/mezon/v2/common/rtapi"
-	"mezon-go-sdk/utils"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/nccasia/mezon-go-sdk/constants"
+	"github.com/nccasia/mezon-go-sdk/mezon-protobuf/mezon/v2/common/rtapi"
+	"github.com/nccasia/mezon-go-sdk/utils"
 
 	"github.com/go-gst/go-gst/gst"
 	"github.com/go-gst/go-gst/gst/app"

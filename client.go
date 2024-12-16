@@ -5,10 +5,12 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
-	swagger "mezon-go-sdk/mezon-api"
-	"mezon-go-sdk/utils"
 	"net/http"
 	"time"
+
+	"github.com/nccasia/mezon-go-sdk/utils"
+
+	swagger "github.com/nccasia/mezon-go-sdk/mezon-api"
 )
 
 type Client struct {
