@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	mezonsdk "mezon-sdk"
+	mezonsdk "mezon-go-sdk"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -21,7 +21,7 @@ func Call() {
 	conn, err := mezonsdk.NewWSConnection(&mezonsdk.Config{
 		BasePath: "dev-mezon.nccsoft.vn:7305",
 		// BasePath:     "api.mezon.vn",
-		ApiKey:       "7663586b614xxxxx47175356a5a4d52",
+		ApiKey:       "7663586b614xxxxxx75356a5a4d52",
 		Timeout:      10,
 		InsecureSkip: true,
 		UseSSL:       true,
@@ -36,7 +36,7 @@ func Call() {
 			{
 				URLs:           []string{"turn:turn.mezon.vn:5349"},
 				Username:       "turnmezon",
-				Credential:     "QuTs4zUEcbylWemXL7MK",
+				Credential:     "xxxxx",
 				CredentialType: webrtc.ICECredentialTypePassword,
 			},
 		},

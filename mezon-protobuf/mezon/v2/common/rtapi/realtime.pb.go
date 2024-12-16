@@ -28,7 +28,7 @@ import (
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
-	api "mezon-sdk/mezon-protobuf/mezon/v2/common/api"
+	api "mezon-go-sdk/mezon-protobuf/mezon/v2/common/api"
 	reflect "reflect"
 	sync "sync"
 )

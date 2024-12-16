@@ -4,8 +4,8 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log"
-	"mezon-sdk/mezon-protobuf/mezon/v2/common/rtapi"
-	"mezon-sdk/utils"
+	"mezon-go-sdk/mezon-protobuf/mezon/v2/common/rtapi"
+	"mezon-go-sdk/utils"
 	"time"
 
 	"github.com/gorilla/websocket"
