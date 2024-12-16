@@ -5,8 +5,8 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
-	swagger "mezon-sdk/mezon-api"
-	"mezon-sdk/utils"
+	swagger "mezon-go-sdk/mezon-api"
+	"mezon-go-sdk/utils"
 	"net/http"
 	"time"
 )

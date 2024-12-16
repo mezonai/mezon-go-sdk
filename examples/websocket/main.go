@@ -2,9 +2,9 @@ package main
 
 import (
 	"fmt"
-	mezonsdk "mezon-sdk"
-	"mezon-sdk/mezon-protobuf/mezon/v2/common/api"
-	"mezon-sdk/mezon-protobuf/mezon/v2/common/rtapi"
+	mezonsdk "mezon-go-sdk"
+	"mezon-go-sdk/mezon-protobuf/mezon/v2/common/api"
+	"mezon-go-sdk/mezon-protobuf/mezon/v2/common/rtapi"
 	"time"
 )
 
