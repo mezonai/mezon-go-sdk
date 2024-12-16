@@ -52,18 +52,17 @@ type callService struct {
 }
 
 type ICallService interface {
+	SetOnImage(onImage func(imgBase64 string) error, snapShootCount int)
 	SendFile(channelId, filePath string) error
 	OnWebsocketEvent(event *rtapi.Envelope) error
 	GetRTCConnectionState(channelId string) webrtc.PeerConnectionState
 }
 
-func NewCallService(botId string, wsConn IWSConnection, config webrtc.Configuration, onImage func(imgBase64 string) error, snapShootCount int) ICallService {
+func NewCallService(botId string, wsConn IWSConnection, config webrtc.Configuration) ICallService {
 	return &callService{
-		botId:          botId,
-		ws:             wsConn,
-		config:         config,
-		snapShootCount: snapShootCount,
-		onImage:        onImage,
+		botId:  botId,
+		ws:     wsConn,
+		config: config,
 	}
 }
 
@@ -277,6 +276,11 @@ func (c *callService) SendFile(channelId, filePath string) error {
 	rtcConn.(*callRTCConn).pipelineForCodec("mp3", []*webrtc.TrackLocalStaticRTP{rtcConn.(*callRTCConn).audioTrack}, audioSrc)
 
 	return nil
+}
+
+func (c *callService) SetOnImage(onImage func(imgBase64 string) error, snapShootCount int) {
+	c.snapShootCount = snapShootCount
+	c.onImage = onImage
 }
 
 // Create the appropriate GStreamer pipeline depending on what codec we are working with

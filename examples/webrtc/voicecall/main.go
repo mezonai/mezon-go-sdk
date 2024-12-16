@@ -46,7 +46,8 @@ func Call() {
 				CredentialType: webrtc.ICECredentialTypePassword,
 			},
 		},
-	}, onImage, 10)
+	})
+	callService.SetOnImage(onImage, 10)
 
 	conn.SetOnWebrtcSignalingFwd(callService.OnWebsocketEvent)
 
