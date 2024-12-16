@@ -4,9 +4,11 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log"
-	"mezon-go-sdk/mezon-protobuf/mezon/v2/common/rtapi"
-	"mezon-go-sdk/utils"
 	"time"
+
+	"github.com/nccasia/mezon-go-sdk/utils"
+
+	"github.com/nccasia/mezon-go-sdk/mezon-protobuf/mezon/v2/common/rtapi"
 
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/proto"

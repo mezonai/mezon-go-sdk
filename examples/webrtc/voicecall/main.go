@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	mezonsdk "mezon-go-sdk"
 	"time"
+
+	mezonsdk "github.com/nccasia/mezon-go-sdk"
 
 	"github.com/pion/webrtc/v4"
 )

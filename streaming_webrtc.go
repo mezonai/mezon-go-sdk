@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"mezon-go-sdk/mezon-protobuf/mezon/v2/common/rtapi"
 	"sync"
 
-	"mezon-go-sdk/constants"
-	"mezon-go-sdk/utils"
+	"github.com/nccasia/mezon-go-sdk/mezon-protobuf/mezon/v2/common/rtapi"
+
+	"github.com/nccasia/mezon-go-sdk/utils"
+
+	"github.com/nccasia/mezon-go-sdk/constants"
 
 	"github.com/go-gst/go-gst/gst"
 	"github.com/go-gst/go-gst/gst/app"
