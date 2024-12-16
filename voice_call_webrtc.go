@@ -1,23 +1,28 @@
 package mezonsdk
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image/jpeg"
 	"log"
 	"mezon-sdk/constants"
 	"mezon-sdk/mezon-protobuf/mezon/v2/common/rtapi"
 	"mezon-sdk/utils"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/go-gst/go-gst/gst"
 	"github.com/go-gst/go-gst/gst/app"
+	"github.com/pion/rtcp"
+	"github.com/pion/rtp"
+	"github.com/pion/rtp/codecs"
 	"github.com/pion/webrtc/v4"
-	"github.com/pion/webrtc/v4/pkg/media/ivfwriter"
+	"github.com/pion/webrtc/v4/pkg/media/samplebuilder"
+	"golang.org/x/image/vp8"
 )
 
 func init() {
@@ -34,6 +39,7 @@ type callRTCConn struct {
 	callerId   string
 
 	audioTrack    *webrtc.TrackLocalStaticRTP
+	rtpChan       chan *rtp.Packet
 	pathImage     string
 	timeSaveImage int
 }
@@ -88,6 +94,7 @@ func (c *callService) newCallRTCConnection(channelId, receiverId string) (*callR
 		audioTrack:    audioTrack,
 		pathImage:     c.pathImage,
 		timeSaveImage: c.timeSaveImage,
+		rtpChan:       make(chan *rtp.Packet),
 	}
 	mapCallRtcConn.Store(channelId, rtcConnection)
 
@@ -101,10 +108,42 @@ func (c *callService) newCallRTCConnection(channelId, receiverId string) (*callR
 	peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 
 		// save image by time receive track
-		if rtcConnection.timeSaveImage > 0 && strings.EqualFold(track.Kind().String(), string(webrtc.MediaKindVideo)) {
-			rtcConnection.saveTrackToImage(receiverId, track)
+		if rtcConnection.timeSaveImage > 0 && track.Kind() == webrtc.RTPCodecTypeVideo {
+			// Send a PLI on an interval so that the publisher is pushing a keyframe every rtcpPLIInterval
+			go func() {
+				ticker := time.NewTicker(time.Second * 3)
+				for range ticker.C {
+					errSend := peerConnection.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: uint32(track.SSRC())}})
+					if errSend != nil {
+						return
+					}
+				}
+			}()
+
+			startTime := time.Now()
+			for {
+				// Read RTP Packets in a loop
+				rtpPacket, _, readErr := track.ReadRTP()
+				if readErr != nil {
+					log.Printf("track read rtp error: %+v \n", readErr)
+					return
+				}
+
+				if time.Since(startTime) > time.Duration(c.timeSaveImage)*time.Second {
+					break
+				}
+
+				// Use a lossy channel to send packets to snapshot handler
+				// We don't want to block and queue up old data
+				select {
+				case rtcConnection.rtpChan <- rtpPacket:
+				default:
+				}
+			}
 		}
 	})
+
+	go rtcConnection.saveTrackToImage(receiverId)
 
 	return rtcConnection, nil
 }
@@ -317,8 +356,8 @@ func (c *callRTCConn) pipelineForCodec(codecName string, tracks []*webrtc.TrackL
 	})
 }
 
-func (c *callRTCConn) saveTrackToImage(receiverId string, track *webrtc.TrackRemote) error {
-	log.Printf("[saveTrackToImage] receiverId: %s, codec: %s \n", receiverId, track.Codec().MimeType)
+func (c *callRTCConn) saveTrackToImage(receiverId string) error {
+	log.Printf("[saveTrackToImage] receiverId: %s \n", receiverId)
 
 	currentDate := time.Now().Format("2006-01-02")
 	currentTime := time.Now().Format("150405")
@@ -327,75 +366,53 @@ func (c *callRTCConn) saveTrackToImage(receiverId string, track *webrtc.TrackRem
 		return err
 	}
 
-	tmpVideo := filepath.Join(folderPath, fmt.Sprintf("tmp_video_%s_%s.ivf", currentTime, receiverId))
-	image := filepath.Join(folderPath, fmt.Sprintf("%s_%s.jpg", currentTime, receiverId))
+	imagePath := filepath.Join(folderPath, fmt.Sprintf("%s_%s.jpg", currentTime, receiverId))
+	sampleBuilder := samplebuilder.New(20, &codecs.VP8Packet{}, 90000)
+	decoder := vp8.NewDecoder()
 
-	defer func() {
-		if err := os.Remove(tmpVideo); err != nil {
-			log.Printf("Failed to delete temp video file: %v", err)
-		}
-	}()
-
-	ivfFile, err := ivfwriter.New(tmpVideo, ivfwriter.WithCodec(track.Codec().MimeType))
-	if err != nil {
-		log.Println("ivfwriter.new: ", err)
-		return err
-	}
-
-	defer func() {
-		if err := ivfFile.Close(); err != nil {
-			log.Println("ivfFile.close: ", err)
-		}
-	}()
-
-	startTime := time.Now()
 	for {
-		rtpPacket, _, err := track.ReadRTP()
+		// Pull RTP Packet from rtpChan
+		sampleBuilder.Push(<-c.rtpChan)
+
+		// Use SampleBuilder to generate full picture from many RTP Packets
+		sample := sampleBuilder.Pop()
+		if sample == nil {
+			continue
+		}
+
+		// Read VP8 header.
+		videoKeyframe := (sample.Data[0]&0x1 == 0)
+		if !videoKeyframe {
+			continue
+		}
+
+		// Begin VP8-to-image decode: Init->DecodeFrameHeader->DecodeFrame
+		decoder.Init(bytes.NewReader(sample.Data), len(sample.Data))
+
+		// Decode header
+		if _, err := decoder.DecodeFrameHeader(); err != nil {
+			log.Printf("decoder.DecodeFrameHeader error: %+v \n", err)
+			return err
+		}
+
+		// Decode Frame
+		img, err := decoder.DecodeFrame()
 		if err != nil {
+			log.Printf("decoder.DecodeFrame error: %+v \n", err)
 			return err
 		}
 
-		if len(rtpPacket.Payload) == 0 {
-			continue
+		file, err := os.Create(imagePath)
+		if err != nil {
+			log.Printf("failed to create image file: %+v \n", err)
+			return fmt.Errorf("failed to create image file: %w", err)
 		}
 
-		if err := ivfFile.WriteRTP(rtpPacket); err != nil {
+		// Encode to (RGB) jpeg
+		if err = jpeg.Encode(file, img, nil); err != nil {
+			log.Printf("jpeg.Encode error: %+v \n", err)
 			return err
 		}
-
-		if time.Since(startTime) > time.Duration(c.timeSaveImage)*time.Second {
-			break
-		}
-	}
-
-	pipelineStr := fmt.Sprintf(`filesrc location=%s ! ivfparse ! vp8dec ! videoconvert ! jpegenc ! jpegparse ! multifilesink location="%s" max-files=1`,
-		tmpVideo, image)
-	pipeline, err := gst.NewPipelineFromString(pipelineStr)
-	if err != nil {
-		log.Println("Failed to create GStreamer pipeline:", err)
-		return err
-	}
-
-	if err := pipeline.SetState(gst.StatePlaying); err != nil {
-		log.Println("[saveTrackToImage] gst error: ", err.Error())
-		return err
-	}
-
-	bus := pipeline.GetPipelineBus()
-	for {
-		msg := bus.Pop()
-		if msg == nil {
-			continue
-		}
-		switch msg.Type() {
-		case gst.MessageEOS:
-			pipeline.SetState(gst.StateNull)
-			return nil
-		case gst.MessageError:
-			err := msg.ParseError()
-			log.Println("[saveTrackToImage] gst error: ", err.Message())
-			pipeline.SetState(gst.StateNull)
-			return err
-		}
+		file.Close()
 	}
 }
