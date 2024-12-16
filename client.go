@@ -1,56 +1,67 @@
-package client
+package mezonsdk
 
 import (
-	"log"
-	"net"
+	"context"
+	"crypto/tls"
+	"encoding/base64"
+	"fmt"
+	swagger "mezon-sdk/mezon-api"
+	"mezon-sdk/utils"
+	"net/http"
 	"time"
-
-	"github.com/golang/protobuf/proto"
-	"github.com/johannesridho/protobuf-over-tcp/message"
 )
 
-func Authenticate() {
-
+type Client struct {
+	api *swagger.APIClient
 }
 
-func sendMessage(conn net.Conn) {
-	log.Println("client connected")
-
-	defer conn.Close()
-
-	messageProto := message.Message{Text: "Hello World", Timestamp: time.Now().Unix()}
-	data, err := proto.Marshal(&messageProto)
-	checkError(err)
-
-	length, err := conn.Write(data)
-	checkError(err)
-
-	log.Printf("Hello world sent, length %d bytes", length)
-}
-
-func startClient() {
-	log.Println("starting tcp client")
-
-	conn, err := net.Dial("tcp", "127.0.0.1:8080")
-	checkError(err)
-
-	defer conn.Close()
-
-	data := make([]byte, 4096)
-	length, err := conn.Read(data)
-	checkError(err)
-
-	messagePb := message.Message{}
-	err = proto.Unmarshal(data[:length], &messagePb)
-	checkError(err)
-
-	log.Printf("received message: %s, timestamp: %v", messagePb.Text, messagePb.Timestamp)
-}
-
-func checkError(err error) {
+func NewClientApi(c *Config) (*swagger.MezonApiService, error) {
+	token, err := getAuthenticate(c)
 	if err != nil {
-		log.Println(err.Error())
+		return nil, err
 	}
+
+	cfg := getSwaggerConfig(c)
+	cfg.AddDefaultHeader("Authorization", fmt.Sprintf("Bearer %s", token))
+	return (&Client{
+		api: swagger.NewAPIClient(cfg),
+	}).api.MezonApi, nil
 }
 
-//go:generate protoc --go_out=. --go-grpc_out=. -I=./message ./message/message.proto
+func getAuthenticate(c *Config) (string, error) {
+	cfg := getSwaggerConfig(c)
+
+	cfg.AddDefaultHeader("Authorization", base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("Basic %s:", c.ApiKey))))
+	token, _, err := swagger.NewAPIClient(cfg).MezonApi.MezonAuthenticate(context.Background(), swagger.ApiAuthenticateRequest{
+		Account: &swagger.ApiAccountApp{
+			Token: c.ApiKey,
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	return token.Token, err
+}
+
+func getSwaggerConfig(c *Config) *swagger.Configuration {
+	cfg := swagger.NewConfiguration()
+	cfg.BasePath = utils.GetBasePath("http", c.BasePath, c.UseSSL)
+	if c.Timeout == 0 {
+		c.Timeout = 15
+	}
+
+	if c.InsecureSkip {
+		cfg.HTTPClient = &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+			},
+		}
+	} else {
+		cfg.HTTPClient = http.DefaultClient
+	}
+	cfg.HTTPClient.Timeout = time.Duration(c.Timeout) * time.Second
+
+	return cfg
+}
