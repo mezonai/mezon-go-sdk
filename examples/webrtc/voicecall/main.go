@@ -17,12 +17,17 @@ func main() {
 	select {}
 }
 
+func onImage(b64 string) error {
+	fmt.Println(b64)
+	return nil
+}
+
 func Call() {
 	channelId := "1840660756006178816"
 	conn, err := mezonsdk.NewWSConnection(&mezonsdk.Config{
-		BasePath: "dev-mezon.nccsoft.vn:7305",
-		// BasePath:     "api.mezon.vn",
-		ApiKey:       "7663586b614xxxxxx75356a5a4d52",
+		// BasePath: "dev-mezon.nccsoft.vn:7305",
+		BasePath:     "api.mezon.vn",
+		ApiKey:       "7663586b61444979547175356a5a4d52",
 		Timeout:      10,
 		InsecureSkip: true,
 		UseSSL:       true,
@@ -37,25 +42,26 @@ func Call() {
 			{
 				URLs:           []string{"turn:turn.mezon.vn:5349"},
 				Username:       "turnmezon",
-				Credential:     "xxxxx",
+				Credential:     "QuTs4zUEcbylWemXL7MK",
 				CredentialType: webrtc.ICECredentialTypePassword,
 			},
 		},
-	}, "images", 10)
+	})
+	callService.SetOnImage(onImage, 10)
 
 	conn.SetOnWebrtcSignalingFwd(callService.OnWebsocketEvent)
 
 	loop := true
 	for loop {
-		if callService.GetRTCConnectionState(channelId) == webrtc.PeerConnectionStateConnected {
-			err = callService.SendFile(channelId, "file:///home/minhnv/Music/test.mp3")
-			if err != nil {
-				panic(err)
-			}
+		// if callService.GetRTCConnectionState(channelId) == webrtc.PeerConnectionStateConnected {
+		// 	err = callService.SendFile(channelId, "file:///home/minhnv/Music/test.mp3")
+		// 	if err != nil {
+		// 		panic(err)
+		// 	}
 
-			fmt.Println("webrtc send file")
-			break
-		}
+		// 	fmt.Println("webrtc send file")
+		// 	break
+		// }
 
 		if callService.GetRTCConnectionState(channelId) == webrtc.PeerConnectionStateFailed {
 			loop = false

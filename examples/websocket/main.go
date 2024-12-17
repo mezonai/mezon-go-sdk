@@ -11,9 +11,9 @@ import (
 
 func main() {
 	conn, err := mezonsdk.NewWSConnection(&mezonsdk.Config{
-		BasePath: "dev-mezon.nccsoft.vn:7305",
-		// BasePath:     "api.mezon.vn",
-		ApiKey:       "7663586b614xxxxx7175356a5a4d52",
+		// BasePath: "dev-mezon.nccsoft.vn:7305",
+		BasePath:     "api.mezon.vn",
+		ApiKey:       "7663586b61444979547175356a5a4d52",
 		Timeout:      10,
 		InsecureSkip: true,
 		UseSSL:       true,
@@ -28,6 +28,11 @@ func main() {
 	})
 
 	time.Sleep(1 * time.Second)
+
+	conn.SetOnChannelMessage(func(e *rtapi.Envelope) error {
+		fmt.Printf("messages => cid: %s, message: %+v \n", e.Cid, e.GetChannelMessage())
+		return nil
+	})
 
 	err = conn.SendMessage(&rtapi.Envelope{
 		Message: &rtapi.Envelope_ChannelMessageSend{

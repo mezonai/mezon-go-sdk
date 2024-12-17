@@ -6,6 +6,7 @@ require (
 	github.com/antihax/optional v1.0.0
 	github.com/go-gst/go-gst v1.4.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
 	github.com/pion/rtcp v1.2.14
 	github.com/pion/rtp v1.8.9
 	github.com/pion/webrtc/v4 v4.0.5
