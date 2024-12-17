@@ -7,18 +7,22 @@ import (
 	"errors"
 	"fmt"
 	"image/jpeg"
+	"io"
 	"log"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/nccasia/mezon-go-sdk/constants"
 	"github.com/nccasia/mezon-go-sdk/mezon-protobuf/mezon/v2/common/rtapi"
 	"github.com/nccasia/mezon-go-sdk/utils"
+	"github.com/pion/webrtc/v4/pkg/media"
 
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
 	"github.com/pion/webrtc/v4"
+	"github.com/pion/webrtc/v4/pkg/media/oggreader"
 	"github.com/pion/webrtc/v4/pkg/media/samplebuilder"
 	"golang.org/x/image/vp8"
 )
@@ -31,7 +35,8 @@ type callRTCConn struct {
 	receiverId string
 	callerId   string
 
-	audioTrack     *webrtc.TrackLocalStaticRTP
+	audioFile      string
+	audioTrack     *webrtc.TrackLocalStaticSample
 	rtpChan        chan *rtp.Packet
 	snapShootCount int
 }
@@ -41,12 +46,13 @@ type callService struct {
 	ws             IWSConnection
 	config         webrtc.Configuration
 	snapShootCount int
+	audioFile      string
 	onImage        func(imgBase64 string) error
 }
 
 type ICallService interface {
 	SetOnImage(onImage func(imgBase64 string) error, snapShootCount int)
-	SendFile(channelId, filePath string) error
+	SetFileAudio(filePath string)
 	OnWebsocketEvent(event *rtapi.Envelope) error
 	GetRTCConnectionState(channelId string) webrtc.PeerConnectionState
 }
@@ -67,22 +73,35 @@ func (c *callService) newCallRTCConnection(channelId, receiverId string) (*callR
 	}
 
 	// Create a audio track
-	// audioTrack, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus}, fmt.Sprintf("audio_opus_%s", channelId), fmt.Sprintf("audio_opus_%s", channelId))
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// _, err = peerConnection.AddTrack(audioTrack)
-	// if err != nil {
-	// 	return nil, err
-	// }
+	audioTrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus}, fmt.Sprintf("audio_opus_%s", channelId), fmt.Sprintf("audio_opus_%s", channelId))
+	if err != nil {
+		return nil, err
+	}
+	rtpSender, err := peerConnection.AddTrack(audioTrack)
+	if err != nil {
+		return nil, err
+	}
+
+	// Read incoming RTCP packets
+	// Before these packets are returned they are processed by interceptors. For things
+	// like NACK this needs to be called.
+	go func() {
+		rtcpBuf := make([]byte, 1500)
+		for {
+			if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+				return
+			}
+		}
+	}()
 
 	// save to store
 	rtcConnection := &callRTCConn{
-		peer:       peerConnection,
-		channelId:  channelId,
-		receiverId: receiverId,
-		callerId:   c.botId,
-		// audioTrack:     audioTrack,
+		peer:           peerConnection,
+		channelId:      channelId,
+		receiverId:     receiverId,
+		callerId:       c.botId,
+		audioFile:      c.audioFile,
+		audioTrack:     audioTrack,
 		snapShootCount: c.snapShootCount,
 		rtpChan:        make(chan *rtp.Packet),
 	}
@@ -115,6 +134,7 @@ func (c *callService) newCallRTCConnection(channelId, receiverId string) (*callR
 				rtpPacket, _, readErr := track.ReadRTP()
 				if readErr != nil {
 					log.Printf("track read rtp error: %+v \n", readErr)
+					c.onICEConnectionStateChange(webrtc.ICEConnectionStateClosed, channelId, receiverId)
 					return
 				}
 
@@ -148,6 +168,32 @@ func (c *callService) OnWebsocketEvent(event *rtapi.Envelope) error {
 
 		switch eventData.DataType {
 		case constants.WEBRTC_SDP_OFFER:
+
+			unzipData, _ := utils.GzipUncompress(eventData.JsonData)
+			var offer webrtc.SessionDescription
+			err := json.Unmarshal([]byte(unzipData), &offer)
+			if err != nil {
+				return err
+			}
+
+			// only video call
+			parsedSDP, err := offer.Unmarshal()
+			if err != nil {
+				return err
+			}
+			hasVideo := false
+			for _, media := range parsedSDP.MediaDescriptions {
+				if media.MediaName.Media == webrtc.RTPCodecTypeVideo.String() {
+					hasVideo = true
+					break
+				}
+			}
+
+			if !hasVideo {
+				log.Println("SDP Offer does not contain video - Rejecting connection")
+				return fmt.Errorf("video track is required but not present in SDP")
+			}
+
 			if !ok {
 				var err error
 				rtcConn, err = c.newCallRTCConnection(eventData.ChannelId, eventData.CallerId)
@@ -156,12 +202,6 @@ func (c *callService) OnWebsocketEvent(event *rtapi.Envelope) error {
 				}
 			}
 
-			unzipData, _ := utils.GzipUncompress(eventData.JsonData)
-			var offer webrtc.SessionDescription
-			err := json.Unmarshal([]byte(unzipData), &offer)
-			if err != nil {
-				return err
-			}
 			if err := rtcConn.peer.SetRemoteDescription(offer); err != nil {
 				return err
 			}
@@ -196,6 +236,9 @@ func (c *callService) OnWebsocketEvent(event *rtapi.Envelope) error {
 			if ok {
 				rtcConn.peer.AddICECandidate(i)
 			}
+
+		case constants.WEBRTC_SDP_QUIT:
+			c.onICEConnectionStateChange(webrtc.ICEConnectionStateClosed, eventData.ChannelId, eventData.ReceiverId)
 		}
 
 	}
@@ -245,10 +288,10 @@ func (c *callService) onICEConnectionStateChange(state webrtc.ICEConnectionState
 
 	switch state {
 	case webrtc.ICEConnectionStateConnected:
+		rtcConn.(*callRTCConn).sendAudioTrack()
 		rtcConn.(*callRTCConn).saveTrackToImage(c.onImage, receiverId)
 
 	case webrtc.ICEConnectionStateClosed:
-
 		if rtcConn.(*callRTCConn).peer.ConnectionState() != webrtc.PeerConnectionStateClosed {
 			rtcConn.(*callRTCConn).peer.Close()
 		}
@@ -257,18 +300,8 @@ func (c *callService) onICEConnectionStateChange(state webrtc.ICEConnectionState
 	}
 }
 
-func (c *callService) SendFile(channelId, filePath string) error {
-	// Start pushing buffers on these tracks
-	audioSrc := fmt.Sprintf("uridecodebin uri=%s ! audioconvert", filePath)
-
-	rtcConn, ok := mapCallRtcConn.Load(channelId)
-	if !ok {
-		return errors.New("can not found call rtc connection")
-	}
-
-	rtcConn.(*callRTCConn).pipelineForCodec("mp3", []*webrtc.TrackLocalStaticRTP{rtcConn.(*callRTCConn).audioTrack}, audioSrc)
-
-	return nil
+func (c *callService) SetFileAudio(filePath string) {
+	c.audioFile = filePath
 }
 
 func (c *callService) SetOnImage(onImage func(imgBase64 string) error, snapShootCount int) {
@@ -276,10 +309,50 @@ func (c *callService) SetOnImage(onImage func(imgBase64 string) error, snapShoot
 	c.onImage = onImage
 }
 
-func (c *callRTCConn) pipelineForCodec(codecName string, tracks []*webrtc.TrackLocalStaticRTP, pipelineSrc string) {
-	log.Printf("[pipelineForCodec] codecName: %s, len(track): %d, pipelineSrc: %s \n", codecName, len(tracks), pipelineSrc)
+func (c *callRTCConn) sendAudioTrack() error {
 
-	//TODO: ffmpeg or convert file in bot repo
+	// Open a OGG file and start reading using our OGGReader
+	file, oggErr := os.Open(c.audioFile)
+	if oggErr != nil {
+		return oggErr
+	}
+
+	// Open on oggfile in non-checksum mode.
+	ogg, _, oggErr := oggreader.NewWith(file)
+	if oggErr != nil {
+		return oggErr
+	}
+
+	// Keep track of last granule, the difference is the amount of samples in the buffer
+	var lastGranule uint64
+
+	// It is important to use a time.Ticker instead of time.Sleep because
+	// * avoids accumulating skew, just calling time.Sleep didn't compensate for the time spent parsing the data
+	// * works around latency issues with Sleep (see https://github.com/golang/go/issues/44343)
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for ; true; <-ticker.C {
+		pageData, pageHeader, oggErr := ogg.ParseNextPage()
+		if errors.Is(oggErr, io.EOF) {
+			log.Println("All audio pages parsed and sent")
+			return nil
+		}
+
+		if oggErr != nil {
+			return oggErr
+		}
+
+		// The amount of samples is the difference between the last and current timestamp
+		sampleCount := float64(pageHeader.GranulePosition - lastGranule)
+		lastGranule = pageHeader.GranulePosition
+		sampleDuration := time.Duration((sampleCount/48000)*1000) * time.Millisecond
+
+		if oggErr = c.audioTrack.WriteSample(media.Sample{Data: pageData, Duration: sampleDuration}); oggErr != nil {
+			return oggErr
+		}
+	}
+	return nil
+
 }
 
 func (c *callRTCConn) saveTrackToImage(onImage func(imgBase64 string) error, receiverId string) error {
