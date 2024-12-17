@@ -12,8 +12,6 @@ import (
 
 	"github.com/nccasia/mezon-go-sdk/constants"
 
-	"github.com/go-gst/go-gst/gst"
-	"github.com/go-gst/go-gst/gst/app"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -217,69 +215,6 @@ func (c *streamingRTCConn) addICECandidate(i webrtc.ICECandidateInit) error {
 	return c.peer.AddICECandidate(i)
 }
 
-// Create the appropriate GStreamer pipeline depending on what codec we are working with
 func (c *streamingRTCConn) pipelineForCodec(codecName string, tracks []*webrtc.TrackLocalStaticRTP, pipelineSrc string) {
-	pipelineStr := "appsink name=appsink"
-	switch codecName {
-	case "vp8":
-		pipelineStr = pipelineSrc + " ! vp8enc error-resilient=partitions keyframe-max-dist=10 auto-alt-ref=true cpu-used=5 deadline=1 ! " + pipelineStr
-	case "vp9":
-		pipelineStr = pipelineSrc + " ! vp9enc ! " + pipelineStr
-	case "h264":
-		pipelineStr = pipelineSrc + " ! video/x-raw,format=I420 ! x264enc speed-preset=ultrafast tune=zerolatency key-int-max=20 ! video/x-h264,stream-format=byte-stream ! " + pipelineStr
-	case "opus":
-		pipelineStr = pipelineSrc + " ! opusenc ! " + pipelineStr
-	case "pcmu":
-		pipelineStr = pipelineSrc + " ! audio/x-raw, rate=8000 ! mulawenc ! " + pipelineStr
-	case "pcma":
-		pipelineStr = pipelineSrc + " ! audio/x-raw, rate=8000 ! alawenc ! " + pipelineStr
-	case "mp3":
-		pipelineStr = pipelineSrc + " ! audioresample ! audio/x-raw,rate=48000 ! opusenc ! rtpopuspay ! " + pipelineStr
-	default:
-		log.Println("Unhandled codec " + codecName)
-		return
-	}
-
-	pipeline, err := gst.NewPipelineFromString(pipelineStr)
-	if err != nil {
-		log.Println("new pipeline gstreamer error: ", err)
-		return
-	}
-
-	if err = pipeline.SetState(gst.StatePlaying); err != nil {
-		log.Println("pipeline gstreamer set state error: ", err)
-		return
-	}
-
-	appSink, err := pipeline.GetElementByName("appsink")
-	if err != nil {
-		log.Println("pipeline gstreamer set state error: ", err)
-		return
-	}
-
-	app.SinkFromElement(appSink).SetCallbacks(&app.SinkCallbacks{
-		NewSampleFunc: func(sink *app.Sink) gst.FlowReturn {
-			sample := sink.PullSample()
-			if sample == nil {
-				return gst.FlowEOS
-			}
-
-			buffer := sample.GetBuffer()
-			if buffer == nil {
-				return gst.FlowError
-			}
-
-			samples := buffer.Map(gst.MapRead).Bytes()
-			defer buffer.Unmap()
-
-			for _, t := range tracks {
-				if _, err := t.Write(samples); err != nil {
-					log.Println("track write error: ", err)
-					return gst.FlowError
-				}
-			}
-
-			return gst.FlowOK
-		},
-	})
+	//TODO: ffmpeg or convert file in bot repo
 }
