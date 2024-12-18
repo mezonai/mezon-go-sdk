@@ -35,24 +35,28 @@ type callRTCConn struct {
 	receiverId string
 	callerId   string
 
-	audioFile      string
-	audioTrack     *webrtc.TrackLocalStaticSample
-	rtpChan        chan *rtp.Packet
-	snapShootCount int
+	acceptCallAudioFile string
+	exitCallAudioFile   string
+	audioTrack          *webrtc.TrackLocalStaticSample
+	rtpChan             chan *rtp.Packet
+	snapShootCount      int
+	isVideoCall         bool
 }
 
 type callService struct {
-	botId          string
-	ws             IWSConnection
-	config         webrtc.Configuration
-	snapShootCount int
-	audioFile      string
-	onImage        func(imgBase64 string) error
+	botId               string
+	ws                  IWSConnection
+	config              webrtc.Configuration
+	snapShootCount      int
+	acceptCallAudioFile string
+	exitCallAudioFile   string
+	onImage             func(imgBase64 string) error
 }
 
 type ICallService interface {
 	SetOnImage(onImage func(imgBase64 string) error, snapShootCount int)
-	SetFileAudio(filePath string)
+	SetAcceptCallFileAudio(filePath string)
+	SetExitCallFileAudio(filePath string)
 	OnWebsocketEvent(event *rtapi.Envelope) error
 	GetRTCConnectionState(channelId string) webrtc.PeerConnectionState
 }
@@ -96,14 +100,16 @@ func (c *callService) newCallRTCConnection(channelId, receiverId string) (*callR
 
 	// save to store
 	rtcConnection := &callRTCConn{
-		peer:           peerConnection,
-		channelId:      channelId,
-		receiverId:     receiverId,
-		callerId:       c.botId,
-		audioFile:      c.audioFile,
-		audioTrack:     audioTrack,
-		snapShootCount: c.snapShootCount,
-		rtpChan:        make(chan *rtp.Packet),
+		peer:                peerConnection,
+		channelId:           channelId,
+		receiverId:          receiverId,
+		callerId:            c.botId,
+		acceptCallAudioFile: c.acceptCallAudioFile,
+		exitCallAudioFile:   c.exitCallAudioFile,
+		audioTrack:          audioTrack,
+		snapShootCount:      c.snapShootCount,
+		rtpChan:             make(chan *rtp.Packet),
+		isVideoCall:         false,
 	}
 	mapCallRtcConn.Store(channelId, rtcConnection)
 
@@ -181,24 +187,19 @@ func (c *callService) OnWebsocketEvent(event *rtapi.Envelope) error {
 			if err != nil {
 				return err
 			}
-			hasVideo := false
-			for _, media := range parsedSDP.MediaDescriptions {
-				if media.MediaName.Media == webrtc.RTPCodecTypeVideo.String() {
-					hasVideo = true
-					break
-				}
-			}
-
-			if !hasVideo {
-				log.Println("SDP Offer does not contain video - Rejecting connection")
-				return fmt.Errorf("video track is required but not present in SDP")
-			}
 
 			if !ok {
 				var err error
 				rtcConn, err = c.newCallRTCConnection(eventData.ChannelId, eventData.CallerId)
 				if err != nil {
 					return err
+				}
+			}
+
+			for _, media := range parsedSDP.MediaDescriptions {
+				if media.MediaName.Media == webrtc.RTPCodecTypeVideo.String() {
+					rtcConn.isVideoCall = true
+					break
 				}
 			}
 
@@ -288,8 +289,13 @@ func (c *callService) onICEConnectionStateChange(state webrtc.ICEConnectionState
 
 	switch state {
 	case webrtc.ICEConnectionStateConnected:
-		rtcConn.(*callRTCConn).sendAudioTrack()
-		rtcConn.(*callRTCConn).saveTrackToImage(c.onImage, receiverId)
+		if rtcConn.(*callRTCConn).isVideoCall {
+			rtcConn.(*callRTCConn).sendAudioTrack(c.acceptCallAudioFile)
+			rtcConn.(*callRTCConn).saveTrackToImage(c.onImage, receiverId)
+		} else {
+			rtcConn.(*callRTCConn).sendAudioTrack(c.exitCallAudioFile)
+			c.onICEConnectionStateChange(webrtc.ICEConnectionStateClosed, channelId, receiverId)
+		}
 
 	case webrtc.ICEConnectionStateClosed:
 		if rtcConn.(*callRTCConn).peer.ConnectionState() != webrtc.PeerConnectionStateClosed {
@@ -300,8 +306,12 @@ func (c *callService) onICEConnectionStateChange(state webrtc.ICEConnectionState
 	}
 }
 
-func (c *callService) SetFileAudio(filePath string) {
-	c.audioFile = filePath
+func (c *callService) SetAcceptCallFileAudio(filePath string) {
+	c.acceptCallAudioFile = filePath
+}
+
+func (c *callService) SetExitCallFileAudio(filePath string) {
+	c.exitCallAudioFile = filePath
 }
 
 func (c *callService) SetOnImage(onImage func(imgBase64 string) error, snapShootCount int) {
@@ -309,10 +319,10 @@ func (c *callService) SetOnImage(onImage func(imgBase64 string) error, snapShoot
 	c.onImage = onImage
 }
 
-func (c *callRTCConn) sendAudioTrack() error {
+func (c *callRTCConn) sendAudioTrack(filePath string) error {
 
 	// Open a OGG file and start reading using our OGGReader
-	file, oggErr := os.Open(c.audioFile)
+	file, oggErr := os.Open(filePath)
 	if oggErr != nil {
 		return oggErr
 	}
@@ -411,6 +421,8 @@ func (c *callRTCConn) saveTrackToImage(onImage func(imgBase64 string) error, rec
 
 		// log.Printf("Generated Base64 for image %s", base64Image)
 		if err := onImage(base64Image); err != nil {
+			close(c.rtpChan)
+			c.peer.Close()
 			return err
 		}
 
