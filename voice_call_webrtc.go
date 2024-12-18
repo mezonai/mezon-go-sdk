@@ -36,6 +36,7 @@ type callRTCConn struct {
 	callerId   string
 
 	checkinSuccessAudioFile string
+	checkinFailAudioFile    string
 	acceptCallAudioFile     string
 	exitCallAudioFile       string
 	audioTrack              *webrtc.TrackLocalStaticSample
@@ -50,6 +51,7 @@ type callService struct {
 	config                  webrtc.Configuration
 	snapShootCount          int
 	checkinSuccessAudioFile string
+	checkinFailAudioFile    string
 	acceptCallAudioFile     string
 	exitCallAudioFile       string
 	onImage                 func(imgBase64 string) error
@@ -58,6 +60,7 @@ type callService struct {
 type ICallService interface {
 	SetOnImage(onImage func(imgBase64 string) error, snapShootCount int)
 	SetCheckinSuccessFileAudio(filePath string)
+	SetCheckinFailFileAudio(filePath string)
 	SetAcceptCallFileAudio(filePath string)
 	SetExitCallFileAudio(filePath string)
 	OnWebsocketEvent(event *rtapi.Envelope) error
@@ -110,6 +113,7 @@ func (c *callService) newCallRTCConnection(channelId, receiverId string) (*callR
 		acceptCallAudioFile:     c.acceptCallAudioFile,
 		exitCallAudioFile:       c.exitCallAudioFile,
 		checkinSuccessAudioFile: c.checkinSuccessAudioFile,
+		checkinFailAudioFile:    c.checkinFailAudioFile,
 		audioTrack:              audioTrack,
 		snapShootCount:          c.snapShootCount,
 		rtpChan:                 make(chan *rtp.Packet),
@@ -322,6 +326,10 @@ func (c *callService) SetCheckinSuccessFileAudio(filePath string) {
 	c.checkinSuccessAudioFile = filePath
 }
 
+func (c *callService) SetCheckinFailFileAudio(filePath string) {
+	c.checkinFailAudioFile = filePath
+}
+
 func (c *callService) SetOnImage(onImage func(imgBase64 string) error, snapShootCount int) {
 	c.snapShootCount = snapShootCount
 	c.onImage = onImage
@@ -440,9 +448,10 @@ func (c *callRTCConn) saveTrackToImage(onImage func(imgBase64 string) error, rec
 		decoder = vp8.NewDecoder()
 
 		if imageCount > c.snapShootCount {
+			c.sendAudioTrack(c.checkinFailAudioFile)
+
 			close(c.rtpChan)
 			c.peer.Close()
-
 			return nil
 		}
 	}
