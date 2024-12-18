@@ -7,28 +7,25 @@ import (
 	"errors"
 	"fmt"
 	"image/jpeg"
+	"io"
 	"log"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/nccasia/mezon-go-sdk/constants"
 	"github.com/nccasia/mezon-go-sdk/mezon-protobuf/mezon/v2/common/rtapi"
 	"github.com/nccasia/mezon-go-sdk/utils"
+	"github.com/pion/webrtc/v4/pkg/media"
 
-	"github.com/go-gst/go-gst/gst"
-	"github.com/go-gst/go-gst/gst/app"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
 	"github.com/pion/webrtc/v4"
+	"github.com/pion/webrtc/v4/pkg/media/oggreader"
 	"github.com/pion/webrtc/v4/pkg/media/samplebuilder"
 	"golang.org/x/image/vp8"
 )
-
-func init() {
-	// Initialize GStreamer
-	gst.Init(nil)
-}
 
 var mapCallRtcConn sync.Map // map[channelId]*RTCConnection
 
@@ -38,22 +35,28 @@ type callRTCConn struct {
 	receiverId string
 	callerId   string
 
-	audioTrack     *webrtc.TrackLocalStaticRTP
-	rtpChan        chan *rtp.Packet
-	snapShootCount int
+	acceptCallAudioFile string
+	exitCallAudioFile   string
+	audioTrack          *webrtc.TrackLocalStaticSample
+	rtpChan             chan *rtp.Packet
+	snapShootCount      int
+	isVideoCall         bool
 }
 
 type callService struct {
-	botId          string
-	ws             IWSConnection
-	config         webrtc.Configuration
-	snapShootCount int
-	onImage        func(imgBase64 string) error
+	botId               string
+	ws                  IWSConnection
+	config              webrtc.Configuration
+	snapShootCount      int
+	acceptCallAudioFile string
+	exitCallAudioFile   string
+	onImage             func(imgBase64 string) error
 }
 
 type ICallService interface {
 	SetOnImage(onImage func(imgBase64 string) error, snapShootCount int)
-	SendFile(channelId, filePath string) error
+	SetAcceptCallFileAudio(filePath string)
+	SetExitCallFileAudio(filePath string)
 	OnWebsocketEvent(event *rtapi.Envelope) error
 	GetRTCConnectionState(channelId string) webrtc.PeerConnectionState
 }
@@ -74,24 +77,39 @@ func (c *callService) newCallRTCConnection(channelId, receiverId string) (*callR
 	}
 
 	// Create a audio track
-	// audioTrack, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus}, fmt.Sprintf("audio_opus_%s", channelId), fmt.Sprintf("audio_opus_%s", channelId))
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// _, err = peerConnection.AddTrack(audioTrack)
-	// if err != nil {
-	// 	return nil, err
-	// }
+	audioTrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus}, fmt.Sprintf("audio_opus_%s", channelId), fmt.Sprintf("audio_opus_%s", channelId))
+	if err != nil {
+		return nil, err
+	}
+	rtpSender, err := peerConnection.AddTrack(audioTrack)
+	if err != nil {
+		return nil, err
+	}
+
+	// Read incoming RTCP packets
+	// Before these packets are returned they are processed by interceptors. For things
+	// like NACK this needs to be called.
+	go func() {
+		rtcpBuf := make([]byte, 1500)
+		for {
+			if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+				return
+			}
+		}
+	}()
 
 	// save to store
 	rtcConnection := &callRTCConn{
-		peer:       peerConnection,
-		channelId:  channelId,
-		receiverId: receiverId,
-		callerId:   c.botId,
-		// audioTrack:     audioTrack,
-		snapShootCount: c.snapShootCount,
-		rtpChan:        make(chan *rtp.Packet),
+		peer:                peerConnection,
+		channelId:           channelId,
+		receiverId:          receiverId,
+		callerId:            c.botId,
+		acceptCallAudioFile: c.acceptCallAudioFile,
+		exitCallAudioFile:   c.exitCallAudioFile,
+		audioTrack:          audioTrack,
+		snapShootCount:      c.snapShootCount,
+		rtpChan:             make(chan *rtp.Packet),
+		isVideoCall:         false,
 	}
 	mapCallRtcConn.Store(channelId, rtcConnection)
 
@@ -122,6 +140,7 @@ func (c *callService) newCallRTCConnection(channelId, receiverId string) (*callR
 				rtpPacket, _, readErr := track.ReadRTP()
 				if readErr != nil {
 					log.Printf("track read rtp error: %+v \n", readErr)
+					c.onICEConnectionStateChange(webrtc.ICEConnectionStateClosed, channelId, receiverId)
 					return
 				}
 
@@ -155,6 +174,20 @@ func (c *callService) OnWebsocketEvent(event *rtapi.Envelope) error {
 
 		switch eventData.DataType {
 		case constants.WEBRTC_SDP_OFFER:
+
+			unzipData, _ := utils.GzipUncompress(eventData.JsonData)
+			var offer webrtc.SessionDescription
+			err := json.Unmarshal([]byte(unzipData), &offer)
+			if err != nil {
+				return err
+			}
+
+			// only video call
+			parsedSDP, err := offer.Unmarshal()
+			if err != nil {
+				return err
+			}
+
 			if !ok {
 				var err error
 				rtcConn, err = c.newCallRTCConnection(eventData.ChannelId, eventData.CallerId)
@@ -163,12 +196,13 @@ func (c *callService) OnWebsocketEvent(event *rtapi.Envelope) error {
 				}
 			}
 
-			unzipData, _ := utils.GzipUncompress(eventData.JsonData)
-			var offer webrtc.SessionDescription
-			err := json.Unmarshal([]byte(unzipData), &offer)
-			if err != nil {
-				return err
+			for _, media := range parsedSDP.MediaDescriptions {
+				if media.MediaName.Media == webrtc.RTPCodecTypeVideo.String() {
+					rtcConn.isVideoCall = true
+					break
+				}
 			}
+
 			if err := rtcConn.peer.SetRemoteDescription(offer); err != nil {
 				return err
 			}
@@ -203,6 +237,9 @@ func (c *callService) OnWebsocketEvent(event *rtapi.Envelope) error {
 			if ok {
 				rtcConn.peer.AddICECandidate(i)
 			}
+
+		case constants.WEBRTC_SDP_QUIT:
+			c.onICEConnectionStateChange(webrtc.ICEConnectionStateClosed, eventData.ChannelId, eventData.ReceiverId)
 		}
 
 	}
@@ -252,10 +289,15 @@ func (c *callService) onICEConnectionStateChange(state webrtc.ICEConnectionState
 
 	switch state {
 	case webrtc.ICEConnectionStateConnected:
-		rtcConn.(*callRTCConn).saveTrackToImage(c.onImage, receiverId)
+		if rtcConn.(*callRTCConn).isVideoCall {
+			rtcConn.(*callRTCConn).sendAudioTrack(c.acceptCallAudioFile)
+			rtcConn.(*callRTCConn).saveTrackToImage(c.onImage, receiverId)
+		} else {
+			rtcConn.(*callRTCConn).sendAudioTrack(c.exitCallAudioFile)
+			c.onICEConnectionStateChange(webrtc.ICEConnectionStateClosed, channelId, receiverId)
+		}
 
 	case webrtc.ICEConnectionStateClosed:
-
 		if rtcConn.(*callRTCConn).peer.ConnectionState() != webrtc.PeerConnectionStateClosed {
 			rtcConn.(*callRTCConn).peer.Close()
 		}
@@ -264,18 +306,12 @@ func (c *callService) onICEConnectionStateChange(state webrtc.ICEConnectionState
 	}
 }
 
-func (c *callService) SendFile(channelId, filePath string) error {
-	// Start pushing buffers on these tracks
-	audioSrc := fmt.Sprintf("uridecodebin uri=%s ! audioconvert", filePath)
+func (c *callService) SetAcceptCallFileAudio(filePath string) {
+	c.acceptCallAudioFile = filePath
+}
 
-	rtcConn, ok := mapCallRtcConn.Load(channelId)
-	if !ok {
-		return errors.New("can not found call rtc connection")
-	}
-
-	rtcConn.(*callRTCConn).pipelineForCodec("mp3", []*webrtc.TrackLocalStaticRTP{rtcConn.(*callRTCConn).audioTrack}, audioSrc)
-
-	return nil
+func (c *callService) SetExitCallFileAudio(filePath string) {
+	c.exitCallAudioFile = filePath
 }
 
 func (c *callService) SetOnImage(onImage func(imgBase64 string) error, snapShootCount int) {
@@ -283,74 +319,50 @@ func (c *callService) SetOnImage(onImage func(imgBase64 string) error, snapShoot
 	c.onImage = onImage
 }
 
-// Create the appropriate GStreamer pipeline depending on what codec we are working with
-func (c *callRTCConn) pipelineForCodec(codecName string, tracks []*webrtc.TrackLocalStaticRTP, pipelineSrc string) {
-	log.Printf("[pipelineForCodec] codecName: %s, len(track): %d, pipelineSrc: %s \n", codecName, len(tracks), pipelineSrc)
+func (c *callRTCConn) sendAudioTrack(filePath string) error {
 
-	pipelineStr := "appsink name=appsink"
-	switch codecName {
-	case "vp8":
-		pipelineStr = pipelineSrc + " ! vp8enc error-resilient=partitions keyframe-max-dist=10 auto-alt-ref=true cpu-used=5 deadline=1 ! " + pipelineStr
-	case "vp9":
-		pipelineStr = pipelineSrc + " ! vp9enc ! " + pipelineStr
-	case "h264":
-		pipelineStr = pipelineSrc + " ! video/x-raw,format=I420 ! x264enc speed-preset=ultrafast tune=zerolatency key-int-max=20 ! video/x-h264,stream-format=byte-stream ! " + pipelineStr
-	case "opus":
-		pipelineStr = pipelineSrc + " ! opusenc ! " + pipelineStr
-	case "pcmu":
-		pipelineStr = pipelineSrc + " ! audio/x-raw, rate=8000 ! mulawenc ! " + pipelineStr
-	case "pcma":
-		pipelineStr = pipelineSrc + " ! audio/x-raw, rate=8000 ! alawenc ! " + pipelineStr
-	case "mp3":
-		// Opus pipeline with RTP payloading
-		pipelineStr = pipelineSrc + " ! audioresample ! audio/x-raw,rate=48000 ! opusenc ! rtpopuspay ! " + pipelineStr
-	default:
-		log.Println("Unhandled codec " + codecName)
-		return
+	// Open a OGG file and start reading using our OGGReader
+	file, oggErr := os.Open(filePath)
+	if oggErr != nil {
+		return oggErr
 	}
 
-	pipeline, err := gst.NewPipelineFromString(pipelineStr)
-	if err != nil {
-		log.Println("new pipeline gstreamer error: ", err)
-		return
+	// Open on oggfile in non-checksum mode.
+	ogg, _, oggErr := oggreader.NewWith(file)
+	if oggErr != nil {
+		return oggErr
 	}
 
-	if err = pipeline.SetState(gst.StatePlaying); err != nil {
-		log.Println("pipeline gstreamer set state error: ", err)
-		return
+	// Keep track of last granule, the difference is the amount of samples in the buffer
+	var lastGranule uint64
+
+	// It is important to use a time.Ticker instead of time.Sleep because
+	// * avoids accumulating skew, just calling time.Sleep didn't compensate for the time spent parsing the data
+	// * works around latency issues with Sleep (see https://github.com/golang/go/issues/44343)
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for ; true; <-ticker.C {
+		pageData, pageHeader, oggErr := ogg.ParseNextPage()
+		if errors.Is(oggErr, io.EOF) {
+			log.Println("All audio pages parsed and sent")
+			return nil
+		}
+
+		if oggErr != nil {
+			return oggErr
+		}
+
+		// The amount of samples is the difference between the last and current timestamp
+		sampleCount := float64(pageHeader.GranulePosition - lastGranule)
+		lastGranule = pageHeader.GranulePosition
+		sampleDuration := time.Duration((sampleCount/48000)*1000) * time.Millisecond
+
+		if oggErr = c.audioTrack.WriteSample(media.Sample{Data: pageData, Duration: sampleDuration}); oggErr != nil {
+			return oggErr
+		}
 	}
+	return nil
 
-	appSink, err := pipeline.GetElementByName("appsink")
-	if err != nil {
-		log.Println("pipeline gstreamer set state error: ", err)
-		return
-	}
-
-	app.SinkFromElement(appSink).SetCallbacks(&app.SinkCallbacks{
-		NewSampleFunc: func(sink *app.Sink) gst.FlowReturn {
-			sample := sink.PullSample()
-			if sample == nil {
-				return gst.FlowEOS
-			}
-
-			buffer := sample.GetBuffer()
-			if buffer == nil {
-				return gst.FlowError
-			}
-
-			samples := buffer.Map(gst.MapRead).Bytes()
-			defer buffer.Unmap()
-
-			for _, t := range tracks {
-				if _, err := t.Write(samples); err != nil {
-					log.Println("track write error: ", err)
-					return gst.FlowError
-				}
-			}
-
-			return gst.FlowOK
-		},
-	})
 }
 
 func (c *callRTCConn) saveTrackToImage(onImage func(imgBase64 string) error, receiverId string) error {
@@ -409,6 +421,8 @@ func (c *callRTCConn) saveTrackToImage(onImage func(imgBase64 string) error, rec
 
 		// log.Printf("Generated Base64 for image %s", base64Image)
 		if err := onImage(base64Image); err != nil {
+			close(c.rtpChan)
+			c.peer.Close()
 			return err
 		}
 

@@ -91,8 +91,12 @@ func (s *WSConnection) SendMessage(data *WsMsg) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// TODO:
-	return nil
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+
+	return s.conn.WriteMessage(websocket.TextMessage, jsonData)
 }
 
 func (s *WSConnection) pingPong() {

@@ -34,25 +34,6 @@
     chmod +x /usr/local/bin/swagger-codegen
 ```
 
-### GStreamer
-This example requires you have GStreamer installed, these are the supported platforms
-
-Debian/Ubuntu
-```bash
-    sudo apt-get install libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good
-    sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav
-```
-
-Windows MinGW64/MSYS2
-```bash
-    pacman -S mingw-w64-x86_64-gstreamer mingw-w64-x86_64-gst-libav mingw-w64-x86_64-gst-plugins-good mingw-w64-x86_64-gst-plugins-bad mingw-w64-x86_64-gst-plugins-ugly
-```
-
-macOS
-```bash
-    brew install gst-plugins-good gst-plugins-ugly pkg-config && export PKG_CONFIG_PATH="/usr/local/opt/libffi/lib/pkgconfig"
-```
-
 ## Generate code
 
 ```bash

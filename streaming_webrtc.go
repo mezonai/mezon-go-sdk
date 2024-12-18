@@ -2,15 +2,19 @@ package mezonsdk
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
+	"os"
 	"sync"
+	"time"
 
 	radiostation "github.com/nccasia/mezon-go-sdk/radio-station"
 
-	"github.com/go-gst/go-gst/gst"
-	"github.com/go-gst/go-gst/gst/app"
 	"github.com/pion/webrtc/v4"
+	"github.com/pion/webrtc/v4/pkg/media"
+	"github.com/pion/webrtc/v4/pkg/media/oggreader"
 )
 
 var (
@@ -26,11 +30,11 @@ type streamingRTCConn struct {
 
 	// TODO: streaming video (#rapchieuphim)
 	// videoTrack *webrtc.TrackLocalStaticRTP
-	audioTrack *webrtc.TrackLocalStaticRTP
+	audioTrack *webrtc.TrackLocalStaticSample
 }
 
 type IStreamingRTCConnection interface {
-	SendFile(filePath string) error
+	SendAudioTrack(filePath string) error
 	Close(channelId string)
 }
 
@@ -51,14 +55,26 @@ func NewStreamingRTCConnection(config webrtc.Configuration, wsConn radiostation.
 	// }
 
 	// Create a audio track
-	audioTrack, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus}, fmt.Sprintf("audio_opus_%s", channelId), fmt.Sprintf("audio_opus_%s", channelId))
+	audioTrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus}, fmt.Sprintf("audio_opus_%s", channelId), fmt.Sprintf("audio_opus_%s", channelId))
 	if err != nil {
 		return nil, err
 	}
-	_, err = peerConnection.AddTrack(audioTrack)
+	rtpSender, err := peerConnection.AddTrack(audioTrack)
 	if err != nil {
 		return nil, err
 	}
+
+	// Read incoming RTCP packets
+	// Before these packets are returned they are processed by interceptors. For things
+	// like NACK this needs to be called.
+	go func() {
+		rtcpBuf := make([]byte, 1500)
+		for {
+			if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+				return
+			}
+		}
+	}()
 
 	// save to store
 	rtcConnection := &streamingRTCConn{
@@ -80,6 +96,13 @@ func NewStreamingRTCConnection(config webrtc.Configuration, wsConn radiostation.
 		switch state {
 		case webrtc.ICEConnectionStateConnected:
 			// TODO: event ice connected
+			jsonData, _ := json.Marshal(map[string]string{"ChannelId": channelId})
+			wsConn.SendMessage(&radiostation.WsMsg{
+				ClanId:    clanId,
+				ChannelId: channelId,
+				Key:       "connect_publisher",
+				Value:     jsonData,
+			})
 		case webrtc.ICEConnectionStateClosed:
 			rtcConn, ok := mapStreamingRtcConn.Load(channelId)
 			if !ok {
@@ -105,18 +128,6 @@ func NewStreamingRTCConnection(config webrtc.Configuration, wsConn radiostation.
 	rtcConnection.sendOffer()
 
 	return rtcConnection, nil
-}
-
-func (c *streamingRTCConn) SendFile(filePath string) error {
-	// Start pushing buffers on these tracks
-	audioSrc := fmt.Sprintf("uridecodebin uri=%s ! queue ! audioconvert", filePath)
-	c.pipelineForCodec("opus", []*webrtc.TrackLocalStaticRTP{c.audioTrack}, audioSrc)
-
-	// TODO: video streaming (#rapchieuphim)
-	// videoSrc := fmt.Sprintf("uridecodebin uri=%s ! videoscale ! video/x-raw, width=320, height=240 ! queue ", filePath)
-	// c.pipelineForCodec("vp8", []*webrtc.TrackLocalStaticRTP{c.videoTrack}, videoSrc)
-
-	return nil
 }
 
 func (c *streamingRTCConn) Close(channelId string) {
@@ -214,69 +225,48 @@ func (c *streamingRTCConn) addICECandidate(i webrtc.ICECandidateInit) error {
 	return c.peer.AddICECandidate(i)
 }
 
-// Create the appropriate GStreamer pipeline depending on what codec we are working with
-func (c *streamingRTCConn) pipelineForCodec(codecName string, tracks []*webrtc.TrackLocalStaticRTP, pipelineSrc string) {
-	pipelineStr := "appsink name=appsink"
-	switch codecName {
-	case "vp8":
-		pipelineStr = pipelineSrc + " ! vp8enc error-resilient=partitions keyframe-max-dist=10 auto-alt-ref=true cpu-used=5 deadline=1 ! " + pipelineStr
-	case "vp9":
-		pipelineStr = pipelineSrc + " ! vp9enc ! " + pipelineStr
-	case "h264":
-		pipelineStr = pipelineSrc + " ! video/x-raw,format=I420 ! x264enc speed-preset=ultrafast tune=zerolatency key-int-max=20 ! video/x-h264,stream-format=byte-stream ! " + pipelineStr
-	case "opus":
-		pipelineStr = pipelineSrc + " ! opusenc ! " + pipelineStr
-	case "pcmu":
-		pipelineStr = pipelineSrc + " ! audio/x-raw, rate=8000 ! mulawenc ! " + pipelineStr
-	case "pcma":
-		pipelineStr = pipelineSrc + " ! audio/x-raw, rate=8000 ! alawenc ! " + pipelineStr
-	case "mp3":
-		pipelineStr = pipelineSrc + " ! audioresample ! audio/x-raw,rate=48000 ! opusenc ! rtpopuspay ! " + pipelineStr
-	default:
-		log.Println("Unhandled codec " + codecName)
-		return
+func (c *streamingRTCConn) SendAudioTrack(filePath string) error {
+
+	// Open a OGG file and start reading using our OGGReader
+	file, oggErr := os.Open(filePath)
+	if oggErr != nil {
+		return oggErr
 	}
 
-	pipeline, err := gst.NewPipelineFromString(pipelineStr)
-	if err != nil {
-		log.Println("new pipeline gstreamer error: ", err)
-		return
+	// Open on oggfile in non-checksum mode.
+	ogg, _, oggErr := oggreader.NewWith(file)
+	if oggErr != nil {
+		return oggErr
 	}
 
-	if err = pipeline.SetState(gst.StatePlaying); err != nil {
-		log.Println("pipeline gstreamer set state error: ", err)
-		return
+	// Keep track of last granule, the difference is the amount of samples in the buffer
+	var lastGranule uint64
+
+	// It is important to use a time.Ticker instead of time.Sleep because
+	// * avoids accumulating skew, just calling time.Sleep didn't compensate for the time spent parsing the data
+	// * works around latency issues with Sleep (see https://github.com/golang/go/issues/44343)
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for ; true; <-ticker.C {
+		pageData, pageHeader, oggErr := ogg.ParseNextPage()
+		if errors.Is(oggErr, io.EOF) {
+			log.Println("All audio pages parsed and sent")
+			return nil
+		}
+
+		if oggErr != nil {
+			return oggErr
+		}
+
+		// The amount of samples is the difference between the last and current timestamp
+		sampleCount := float64(pageHeader.GranulePosition - lastGranule)
+		lastGranule = pageHeader.GranulePosition
+		sampleDuration := time.Duration((sampleCount/48000)*1000) * time.Millisecond
+
+		if oggErr = c.audioTrack.WriteSample(media.Sample{Data: pageData, Duration: sampleDuration}); oggErr != nil {
+			return oggErr
+		}
 	}
+	return nil
 
-	appSink, err := pipeline.GetElementByName("appsink")
-	if err != nil {
-		log.Println("pipeline gstreamer set state error: ", err)
-		return
-	}
-
-	app.SinkFromElement(appSink).SetCallbacks(&app.SinkCallbacks{
-		NewSampleFunc: func(sink *app.Sink) gst.FlowReturn {
-			sample := sink.PullSample()
-			if sample == nil {
-				return gst.FlowEOS
-			}
-
-			buffer := sample.GetBuffer()
-			if buffer == nil {
-				return gst.FlowError
-			}
-
-			samples := buffer.Map(gst.MapRead).Bytes()
-			defer buffer.Unmap()
-
-			for _, t := range tracks {
-				if _, err := t.Write(samples); err != nil {
-					log.Println("track write error: ", err)
-					return gst.FlowError
-				}
-			}
-
-			return gst.FlowOK
-		},
-	})
 }
