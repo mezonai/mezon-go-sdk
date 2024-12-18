@@ -1,12 +1,15 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 
 	mezonsdk "github.com/nccasia/mezon-go-sdk"
 
 	"github.com/pion/webrtc/v4"
 )
+
+var checkinSuccess = false
 
 func main() {
 
@@ -18,6 +21,12 @@ func main() {
 
 func onImage(b64 string) error {
 	fmt.Println(b64)
+	if checkinSuccess {
+		return errors.New("checkin success")
+	}
+
+	checkinSuccess = true
+
 	return nil
 }
 
@@ -50,6 +59,7 @@ func Call() {
 	callService.SetOnImage(onImage, 10)
 	callService.SetAcceptCallFileAudio("hello.ogg")
 	callService.SetExitCallFileAudio("exit-call.ogg")
+	callService.SetCheckinSuccessFileAudio("checkin-success.ogg")
 
 	conn.SetOnWebrtcSignalingFwd(callService.OnWebsocketEvent)
 
