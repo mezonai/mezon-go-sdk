@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"time"
 
 	mezonsdk "github.com/nccasia/mezon-go-sdk"
 
@@ -23,7 +22,7 @@ func onImage(b64 string) error {
 }
 
 func Call() {
-	channelId := "1840660756006178816"
+	// channelId := "1840660756006178816"
 	conn, err := mezonsdk.NewWSConnection(&mezonsdk.Config{
 		// BasePath: "dev-mezon.nccsoft.vn:7305",
 		BasePath:     "api.mezon.vn",
@@ -47,26 +46,12 @@ func Call() {
 			},
 		},
 	})
+
 	callService.SetOnImage(onImage, 10)
+	callService.SetAcceptCallFileAudio("hello.ogg")
+	callService.SetExitCallFileAudio("exit-call.ogg")
 
 	conn.SetOnWebrtcSignalingFwd(callService.OnWebsocketEvent)
 
-	loop := true
-	for loop {
-		// if callService.GetRTCConnectionState(channelId) == webrtc.PeerConnectionStateConnected {
-		// 	err = callService.SendFile(channelId, "file:///home/minhnv/Music/test.mp3")
-		// 	if err != nil {
-		// 		panic(err)
-		// 	}
-
-		// 	fmt.Println("webrtc send file")
-		// 	break
-		// }
-
-		if callService.GetRTCConnectionState(channelId) == webrtc.PeerConnectionStateFailed {
-			loop = false
-		}
-
-		time.Sleep(500 * time.Millisecond)
-	}
+	select {}
 }
