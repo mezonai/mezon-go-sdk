@@ -2,7 +2,7 @@ package main
 
 import (
 	mezonsdk "github.com/nccasia/mezon-go-sdk"
-
+	radiostation "github.com/nccasia/mezon-go-sdk/radio-station"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -16,31 +16,32 @@ func main() {
 
 func Streaming() {
 
-	conn, err := mezonsdk.NewWSConnection(&mezonsdk.Config{
-		BasePath: "dev-mezon.nccsoft.vn:7305",
-		// BasePath:     "api.mezon.vn",
-		ApiKey:       "7663586b61xxxxxxxx356a5a4d52",
+	clanId := "1775732550744936448"    // KOMU_2
+	channelId := "1837040466697129984" // NCC8
+	wsConn, err := radiostation.NewWSConnection(&radiostation.Config{
+		BasePath:     "stn.nccsoft.vn",
 		Timeout:      10,
 		InsecureSkip: true,
 		UseSSL:       true,
-	}, "1827955317304987648")
+	}, clanId)
 	if err != nil {
 		panic(err)
 	}
 
-	filePath := ""
+	// ffmpeg -i test.mp3 -c:a libopus -page_duration 20000 test.ogg;
+	filePath := "ncc8.ogg"
 	rtcConn, err := mezonsdk.NewStreamingRTCConnection(webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{
 			{
-				URLs: []string{"stun.l.google.com:19302"},
+				URLs: []string{"stun:stun.l.google.com:19302"}, // TODO: check radio station ice server
 			},
 		},
-	}, conn, "1827987498463137792", "1827987498463137792")
+	}, wsConn, clanId, channelId)
 	if err != nil {
 		panic(err)
 	}
 
-	err = rtcConn.SendFile(filePath)
+	err = rtcConn.SendAudioTrack(filePath)
 	if err != nil {
 		panic(err)
 	}
