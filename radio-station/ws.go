@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
+	"github.com/nccasia/mezon-go-sdk/configs"
 	"github.com/nccasia/mezon-go-sdk/utils"
 )
 
@@ -35,7 +36,7 @@ type IWSConnection interface {
 
 // TODO: implement (TODO) for IWSConnection
 
-func NewWSConnection(c *Config, clanId, channelId, userId, displayName string) (IWSConnection, error) {
+func NewWSConnection(c *configs.Config, clanId, channelId, userId, displayName string) (IWSConnection, error) {
 
 	// TODO: authenticate token for ws
 	// token, err := getAuthenticate(c)

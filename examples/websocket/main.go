@@ -5,12 +5,13 @@ import (
 	"time"
 
 	mezonsdk "github.com/nccasia/mezon-go-sdk"
+	"github.com/nccasia/mezon-go-sdk/configs"
 	"github.com/nccasia/mezon-go-sdk/mezon-protobuf/mezon/v2/common/api"
 	"github.com/nccasia/mezon-go-sdk/mezon-protobuf/mezon/v2/common/rtapi"
 )
 
 func main() {
-	conn, err := mezonsdk.NewWSConnection(&mezonsdk.Config{
+	conn, err := mezonsdk.NewWSConnection(&configs.Config{
 		// BasePath: "dev-mezon.nccsoft.vn:7305",
 		BasePath:     "api.mezon.vn",
 		ApiKey:       "7663586b61444979547175356a5a4d52",

@@ -8,10 +8,6 @@
 
 ✅ Socket
 
-❌ WIP Webrtc streaming
-
-❌ WIP Webrtc voice call
-
 ## Install
 
 ### protoc-gen-go
