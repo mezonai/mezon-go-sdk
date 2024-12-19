@@ -16,14 +16,16 @@ func main() {
 
 func Streaming() {
 
-	clanId := "1775732550744936448"    // KOMU_2
-	channelId := "1837040466697129984" // NCC8
+	clanId := "3456110592"    // KOMU_2
+	channelId := "4311748608" // NCC8
+	userId := "4198400"       // longma350
+	displayName := "BOT350"   // longma350
 	wsConn, err := radiostation.NewWSConnection(&radiostation.Config{
 		BasePath:     "stn.nccsoft.vn",
 		Timeout:      10,
 		InsecureSkip: true,
 		UseSSL:       true,
-	}, clanId)
+	}, clanId, channelId, userId, displayName)
 	if err != nil {
 		panic(err)
 	}
@@ -36,7 +38,7 @@ func Streaming() {
 				URLs: []string{"stun:stun.l.google.com:19302"}, // TODO: check radio station ice server
 			},
 		},
-	}, wsConn, clanId, channelId)
+	}, wsConn, clanId, channelId, userId, displayName)
 	if err != nil {
 		panic(err)
 	}
