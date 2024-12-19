@@ -16,16 +16,15 @@ func recvDefaultHandler(e *WsMsg) error {
 }
 
 type WSConnection struct {
-	conn        *websocket.Conn
-	dialer      *websocket.Dialer
-	basePath    string
-	token       string
-	clanId      string
-	channelId   string
-	userId      string
-	displayName string
-	mu          sync.Mutex
-	onMessage   func(*WsMsg) error
+	conn      *websocket.Conn
+	dialer    *websocket.Dialer
+	basePath  string
+	token     string
+	clanId    string
+	channelId string
+	userId    string
+	mu        sync.Mutex
+	onMessage func(*WsMsg) error
 }
 
 type IWSConnection interface {
@@ -35,7 +34,7 @@ type IWSConnection interface {
 
 // TODO: implement (TODO) for IWSConnection
 
-func NewWSConnection(c *Config, clanId, channelId, userId, displayName string) (IWSConnection, error) {
+func NewWSConnection(c *Config, clanId, channelId, userId string) (IWSConnection, error) {
 
 	// TODO: authenticate token for ws
 	// token, err := getAuthenticate(c)

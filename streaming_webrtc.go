@@ -25,10 +25,9 @@ type streamingRTCConn struct {
 	peer *webrtc.PeerConnection
 	ws   radiostation.IWSConnection
 
-	clanId      string
-	channelId   string
-	userId      string
-	displayName string
+	clanId    string
+	channelId string
+	userId    string
 
 	// TODO: streaming video (#rapchieuphim)
 	// videoTrack *webrtc.TrackLocalStaticRTP
@@ -40,7 +39,7 @@ type IStreamingRTCConnection interface {
 	Close(channelId string)
 }
 
-func NewStreamingRTCConnection(config webrtc.Configuration, wsConn radiostation.IWSConnection, clanId, channelId, userId, displayName string) (IStreamingRTCConnection, error) {
+func NewStreamingRTCConnection(config webrtc.Configuration, wsConn radiostation.IWSConnection, clanId, channelId, userId string) (IStreamingRTCConnection, error) {
 	peerConnection, err := webrtc.NewPeerConnection(config)
 	if err != nil {
 		return nil, err
@@ -80,13 +79,12 @@ func NewStreamingRTCConnection(config webrtc.Configuration, wsConn radiostation.
 
 	// save to store
 	rtcConnection := &streamingRTCConn{
-		peer:        peerConnection,
-		ws:          wsConn,
-		clanId:      clanId,
-		channelId:   channelId,
-		userId:      userId,
-		displayName: displayName,
-		audioTrack:  audioTrack,
+		peer:       peerConnection,
+		ws:         wsConn,
+		clanId:     clanId,
+		channelId:  channelId,
+		userId:     userId,
+		audioTrack: audioTrack,
 	}
 
 	// ws receive message handler ( on event )
@@ -101,12 +99,11 @@ func NewStreamingRTCConnection(config webrtc.Configuration, wsConn radiostation.
 			// TODO: event ice connected
 			jsonData, _ := json.Marshal(map[string]string{"ChannelId": channelId})
 			wsConn.SendMessage(&radiostation.WsMsg{
-				ClanId:      clanId,
-				ChannelId:   channelId,
-				Key:         "connect_publisher",
-				Value:       jsonData,
-				UserId:      userId,
-				DisplayName: displayName,
+				ClanId:    clanId,
+				ChannelId: channelId,
+				Key:       "connect_publisher",
+				Value:     jsonData,
+				UserId:    userId,
 			})
 		case webrtc.ICEConnectionStateClosed:
 			rtcConn, ok := mapStreamingRtcConn.Load(channelId)
@@ -126,7 +123,7 @@ func NewStreamingRTCConnection(config webrtc.Configuration, wsConn radiostation.
 		}
 	})
 	peerConnection.OnICECandidate(func(i *webrtc.ICECandidate) {
-		rtcConnection.onICECandidate(i, channelId, clanId, userId, displayName)
+		rtcConnection.onICECandidate(i, channelId, clanId, userId)
 	})
 
 	// send offer
@@ -198,16 +195,15 @@ func (c *streamingRTCConn) sendOffer() error {
 
 	// send socket signaling, gzip compress data
 	return c.ws.SendMessage(&radiostation.WsMsg{
-		Key:         "session_publisher",
-		ClanId:      c.clanId,
-		ChannelId:   c.channelId,
-		UserId:      c.userId,
-		DisplayName: c.displayName,
-		Value:       byteJson,
+		Key:       "session_publisher",
+		ClanId:    c.clanId,
+		ChannelId: c.channelId,
+		UserId:    c.userId,
+		Value:     byteJson,
 	})
 }
 
-func (c *streamingRTCConn) onICECandidate(i *webrtc.ICECandidate, clanId, channelId, userId, displayName string) error {
+func (c *streamingRTCConn) onICECandidate(i *webrtc.ICECandidate, clanId, channelId, userId string) error {
 	if i == nil {
 		return nil
 	}
@@ -219,12 +215,11 @@ func (c *streamingRTCConn) onICECandidate(i *webrtc.ICECandidate, clanId, channe
 	}
 
 	return c.ws.SendMessage(&radiostation.WsMsg{
-		Key:         "ice_candidate",
-		Value:       candidateString,
-		ClanId:      clanId,
-		ChannelId:   channelId,
-		UserId:      userId,
-		DisplayName: displayName,
+		Key:       "ice_candidate",
+		Value:     candidateString,
+		ClanId:    clanId,
+		ChannelId: channelId,
+		UserId:    userId,
 	})
 }
 
