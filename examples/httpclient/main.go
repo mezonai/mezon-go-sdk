@@ -5,13 +5,14 @@ import (
 	"fmt"
 
 	mezonsdk "github.com/nccasia/mezon-go-sdk"
+	"github.com/nccasia/mezon-go-sdk/configs"
 	swagger "github.com/nccasia/mezon-go-sdk/mezon-api"
 
 	"github.com/antihax/optional"
 )
 
 func main() {
-	api, err := mezonsdk.NewClientApi(&mezonsdk.Config{
+	api, err := mezonsdk.NewClientApi(&configs.Config{
 		BasePath: "dev-mezon.nccsoft.vn:7305",
 		// BasePath:     "api.mezon.vn",
 		ApiKey:       "7663586b61xxxxxxxx356a5a4d52",

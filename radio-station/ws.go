@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
+	"github.com/nccasia/mezon-go-sdk/configs"
 	"github.com/nccasia/mezon-go-sdk/utils"
 )
 
@@ -16,13 +17,16 @@ func recvDefaultHandler(e *WsMsg) error {
 }
 
 type WSConnection struct {
-	conn      *websocket.Conn
-	dialer    *websocket.Dialer
-	basePath  string
-	token     string
-	clanId    string
-	mu        sync.Mutex
-	onMessage func(*WsMsg) error
+	conn        *websocket.Conn
+	dialer      *websocket.Dialer
+	basePath    string
+	token       string
+	clanId      string
+	channelId   string
+	userId      string
+	displayName string
+	mu          sync.Mutex
+	onMessage   func(*WsMsg) error
 }
 
 type IWSConnection interface {
@@ -32,7 +36,7 @@ type IWSConnection interface {
 
 // TODO: implement (TODO) for IWSConnection
 
-func NewWSConnection(c *Config, clanId string) (IWSConnection, error) {
+func NewWSConnection(c *configs.Config, clanId, channelId, userId, displayName string) (IWSConnection, error) {
 
 	// TODO: authenticate token for ws
 	// token, err := getAuthenticate(c)
