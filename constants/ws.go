@@ -1,7 +1,7 @@
 package constants
 
 const (
-	DefaultBaseWS = "wss://dev-mezon.nccsoft.vn:7305"
+	DefaultBaseWS = "wss://api.mezon.vn"
 )
 const (
 	WEBRTC_SDP_OFFER     = 1

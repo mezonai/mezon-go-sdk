@@ -50,7 +50,7 @@ func NewWSConnection(c *configs.Config, clanId string) (IWSConnection, error) {
 
 	client := &WSConnection{
 		token:                  token,
-		basePath:               utils.GetBasePath("ws", c.BasePath, c.UseSSL),
+		basePath:               utils.GetBasePath("wss", c.BasePath, c.UseSSL),
 		clanId:                 clanId,
 		onJoinStreamingChannel: recvDefaultHandler,
 		onWebrtcSignalingFwd:   recvDefaultHandler,
