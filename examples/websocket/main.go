@@ -18,7 +18,7 @@ func main() {
 		Timeout:      10,
 		InsecureSkip: true,
 		UseSSL:       true,
-	}, "1827955317304987648")
+	}, []string{"1827955317304987648"})
 	if err != nil {
 		panic(err)
 	}
