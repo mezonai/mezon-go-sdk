@@ -25,7 +25,7 @@ type WSConnection struct {
 	dialer                 *websocket.Dialer
 	basePath               string
 	token                  string
-	clanId                 string
+	clanIds                []string
 	mu                     sync.Mutex
 	onJoinStreamingChannel func(*rtapi.Envelope) error
 	onWebrtcSignalingFwd   func(*rtapi.Envelope) error
@@ -42,7 +42,7 @@ type IWSConnection interface {
 	Close() error
 }
 
-func NewWSConnection(c *configs.Config, clanId string) (IWSConnection, error) {
+func NewWSConnection(c *configs.Config, clanIds []string) (IWSConnection, error) {
 	token, err := getAuthenticate(c)
 	if err != nil {
 		return nil, err
@@ -51,7 +51,7 @@ func NewWSConnection(c *configs.Config, clanId string) (IWSConnection, error) {
 	client := &WSConnection{
 		token:                  token,
 		basePath:               utils.GetBasePath("ws", c.BasePath, c.UseSSL),
-		clanId:                 clanId,
+		clanIds:                clanIds,
 		onJoinStreamingChannel: recvDefaultHandler,
 		onWebrtcSignalingFwd:   recvDefaultHandler,
 		onPong:                 recvDefaultHandler,
@@ -84,8 +84,9 @@ func (s *WSConnection) newWSConnection() error {
 	}
 
 	s.conn = conn
-	if err = s.joinClan(s.clanId); err != nil {
-		log.Printf("WebSocket join clan: %s, err: %+v \n", s.clanId, err)
+
+	if err = s.joinClan(s.clanIds); err != nil {
+		log.Printf("WebSocket join clan: %s, err: %+v \n", err)
 		return err
 	}
 
@@ -112,16 +113,20 @@ func (s *WSConnection) SendMessage(data *rtapi.Envelope) error {
 	return s.conn.WriteMessage(websocket.BinaryMessage, jsonData)
 }
 
-func (s *WSConnection) joinClan(clanId string) error {
-	clanJoinData := &rtapi.Envelope{
-		Cid: "",
-		Message: &rtapi.Envelope_ClanJoin{
-			ClanJoin: &rtapi.ClanJoin{
-				ClanId: clanId,
+func (s *WSConnection) joinClan(clanIds []string) error {
+	for _, clanId := range clanIds {
+		clanJoinData := &rtapi.Envelope{
+			Cid: "",
+			Message: &rtapi.Envelope_ClanJoin{
+				ClanJoin: &rtapi.ClanJoin{
+					ClanId: clanId,
+				},
 			},
-		},
+		}
+		s.SendMessage(clanJoinData)
 	}
-	return s.SendMessage(clanJoinData)
+
+	return nil
 }
 
 func (s *WSConnection) pingPong() {
