@@ -37,7 +37,19 @@ func NewClient(c *configs.Config) (*Client, error) {
 }
 
 func (c *Client) CreateSocket() (IWSConnection, error) {
-	socket, err := NewWSConnection(c.cfg, c.token)
+	clanDescs, _, err := c.Api.MezonListClanDescs(context.Background(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	listJoinedClan := make([]string, len(clanDescs.Clandesc))
+
+	// for DM
+	listJoinedClan = append(listJoinedClan, "0")
+	for _, clan := range clanDescs.Clandesc {
+		listJoinedClan = append(listJoinedClan, clan.ClanId)
+	}
+	socket, err := NewWSConnection(c.cfg, c.token, listJoinedClan)
 	if err != nil {
 		return nil, err
 	}

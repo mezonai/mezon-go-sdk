@@ -42,9 +42,10 @@ type IWSConnection interface {
 	Close() error
 }
 
-func NewWSConnection(c *configs.Config, token string) (IWSConnection, error) {
+func NewWSConnection(c *configs.Config, token string, clanIds []string) (IWSConnection, error) {
 	socket := &WSConnection{
 		token:                  token,
+		clanIds:                clanIds,
 		basePath:               utils.GetBasePath("ws", c.BasePath, c.UseSSL),
 		onJoinStreamingChannel: recvDefaultHandler,
 		onWebrtcSignalingFwd:   recvDefaultHandler,
@@ -66,9 +67,6 @@ func NewWSConnection(c *configs.Config, token string) (IWSConnection, error) {
 	if err := socket.newWSConnection(); err != nil {
 		return nil, err
 	}
-
-	// join DM for default
-	socket.joinClan([]string{""})
 
 	return socket, nil
 }
