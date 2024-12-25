@@ -22,17 +22,18 @@ type Client struct {
 }
 
 func NewClient(c *configs.Config) (*Client, error) {
-	token, err := getAuthenticate(c)
+	cfg := getSwaggerConfig(c)
+	api := swagger.NewAPIClient(cfg).MezonApi
+	token, err := getAuthenticate(c, api)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg := getSwaggerConfig(c)
 	cfg.AddDefaultHeader("Authorization", fmt.Sprintf("Bearer %s", token))
 	return (&Client{
 		cfg:   c,
 		token: token,
-		Api:   swagger.NewAPIClient(cfg).MezonApi,
+		Api:   api,
 	}), nil
 }
 
@@ -59,11 +60,11 @@ func (c *Client) CreateSocket() (IWSConnection, error) {
 	return socket, nil
 }
 
-func getAuthenticate(c *configs.Config) (string, error) {
+func getAuthenticate(c *configs.Config, api *swagger.MezonApiService) (string, error) {
 	cfg := getSwaggerConfig(c)
 
 	cfg.AddDefaultHeader("Authorization", base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("Basic %s:", c.ApiKey))))
-	token, _, err := swagger.NewAPIClient(cfg).MezonApi.MezonAuthenticate(context.Background(), swagger.ApiAuthenticateRequest{
+	token, _, err := api.MezonAuthenticate(context.Background(), swagger.ApiAuthenticateRequest{
 		Account: &swagger.ApiAccountApp{
 			Token: c.ApiKey,
 		},
