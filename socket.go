@@ -43,7 +43,7 @@ type IWSConnection interface {
 }
 
 func NewWSConnection(c *configs.Config, token string) (IWSConnection, error) {
-	client := &WSConnection{
+	socket := &WSConnection{
 		token:                  token,
 		basePath:               utils.GetBasePath("ws", c.BasePath, c.UseSSL),
 		onJoinStreamingChannel: recvDefaultHandler,
@@ -56,18 +56,21 @@ func NewWSConnection(c *configs.Config, token string) (IWSConnection, error) {
 		tlsConfig := &tls.Config{
 			InsecureSkipVerify: true,
 		}
-		client.dialer = &websocket.Dialer{
+		socket.dialer = &websocket.Dialer{
 			TLSClientConfig: tlsConfig,
 		}
 	} else {
-		client.dialer = websocket.DefaultDialer
+		socket.dialer = websocket.DefaultDialer
 	}
 
-	if err := client.newWSConnection(); err != nil {
+	if err := socket.newWSConnection(); err != nil {
 		return nil, err
 	}
 
-	return client, nil
+	// join DM for default
+	socket.joinClan([]string{""})
+
+	return socket, nil
 }
 
 func (s *WSConnection) newWSConnection() error {

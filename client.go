@@ -15,9 +15,10 @@ import (
 )
 
 type Client struct {
-	cfg   *configs.Config
-	token string
-	Api   *swagger.MezonApiService
+	cfg    *configs.Config
+	token  string
+	Api    *swagger.MezonApiService
+	Socket IWSConnection
 }
 
 func NewClient(c *configs.Config) (*Client, error) {
@@ -40,6 +41,8 @@ func (c *Client) CreateSocket() (IWSConnection, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	c.Socket = socket
 
 	return socket, nil
 }
