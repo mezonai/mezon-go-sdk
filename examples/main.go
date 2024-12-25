@@ -16,9 +16,9 @@ import (
 
 func main() {
 	client, err := mezonsdk.NewClient(&configs.Config{
-		//BasePath: "dev-mezon.nccsoft.vn:7305",
-		BasePath:     "api.mezon.vn",
-		ApiKey:       "736f556c6f764f685162756e53387651",
+		BasePath: "dev-mezon.nccsoft.vn:7305",
+		//BasePath:     "api.mezon.vn",
+		ApiKey:       "xxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
 		Timeout:      10,
 		InsecureSkip: true,
 		UseSSL:       true,
