@@ -42,16 +42,10 @@ type IWSConnection interface {
 	Close() error
 }
 
-func NewWSConnection(c *configs.Config, clanId string) (IWSConnection, error) {
-	token, err := getAuthenticate(c)
-	if err != nil {
-		return nil, err
-	}
-
+func NewWSConnection(c *configs.Config, token string) (IWSConnection, error) {
 	client := &WSConnection{
 		token:                  token,
 		basePath:               utils.GetBasePath("ws", c.BasePath, c.UseSSL),
-		clanId:                 clanId,
 		onJoinStreamingChannel: recvDefaultHandler,
 		onWebrtcSignalingFwd:   recvDefaultHandler,
 		onPong:                 recvDefaultHandler,
