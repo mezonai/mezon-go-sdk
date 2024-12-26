@@ -198,7 +198,7 @@ func (s *WSConnection) recvMessage() {
 			case *rtapi.Envelope_Pong:
 				s.onPong(request)
 			case *rtapi.Envelope_ChannelMessage:
-				s.onChannelMessage(request)
+				go s.onChannelMessage(request)
 			}
 		}
 	}()

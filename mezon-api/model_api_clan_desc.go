@@ -11,13 +11,13 @@
 package swagger
 
 type ApiClanDesc struct {
-	CreatorId string `json:"creatorId,omitempty"`
-	ClanName string `json:"clanName,omitempty"`
-	Logo string `json:"logo,omitempty"`
-	Banner string `json:"banner,omitempty"`
-	ClanId string `json:"clanId,omitempty"`
-	Status int32 `json:"status,omitempty"`
-	BadgeCount int32 `json:"badgeCount,omitempty"`
+	CreatorId  string `json:"creator_id,omitempty"`
+	ClanName   string `json:"clan_name,omitempty"`
+	Logo       string `json:"logo,omitempty"`
+	Banner     string `json:"banner,omitempty"`
+	ClanId     string `json:"clan_id,omitempty"`
+	Status     int32  `json:"status,omitempty"`
+	BadgeCount int32  `json:"badge_count,omitempty"`
 	// Is onboarding.
-	IsOnboarding bool `json:"isOnboarding,omitempty"`
+	IsOnboarding bool `json:"is_onboarding,omitempty"`
 }
