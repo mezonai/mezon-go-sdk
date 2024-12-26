@@ -15,27 +15,56 @@ import (
 )
 
 type Client struct {
-	api *swagger.APIClient
+	cfg    *configs.Config
+	token  string
+	Api    *swagger.MezonApiService
+	Socket IWSConnection
 }
 
-func NewClientApi(c *configs.Config) (*swagger.MezonApiService, error) {
-	token, err := getAuthenticate(c)
+func NewClient(c *configs.Config) (*Client, error) {
+	cfg := getSwaggerConfig(c)
+	api := swagger.NewAPIClient(cfg).MezonApi
+	token, err := getAuthenticate(c, api)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg := getSwaggerConfig(c)
 	cfg.AddDefaultHeader("Authorization", fmt.Sprintf("Bearer %s", token))
 	return (&Client{
-		api: swagger.NewAPIClient(cfg),
-	}).api.MezonApi, nil
+		cfg:   c,
+		token: token,
+		Api:   api,
+	}), nil
 }
 
-func getAuthenticate(c *configs.Config) (string, error) {
+func (c *Client) CreateSocket() (IWSConnection, error) {
+	clanDescs, _, err := c.Api.MezonListClanDescs(context.Background(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	listJoinedClan := make([]string, len(clanDescs.Clandesc))
+
+	// for DM
+	listJoinedClan = append(listJoinedClan, "0")
+	for _, clan := range clanDescs.Clandesc {
+		listJoinedClan = append(listJoinedClan, clan.ClanId)
+	}
+	socket, err := NewWSConnection(c.cfg, c.token, listJoinedClan)
+	if err != nil {
+		return nil, err
+	}
+
+	c.Socket = socket
+
+	return socket, nil
+}
+
+func getAuthenticate(c *configs.Config, api *swagger.MezonApiService) (string, error) {
 	cfg := getSwaggerConfig(c)
 
 	cfg.AddDefaultHeader("Authorization", base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("Basic %s:", c.ApiKey))))
-	token, _, err := swagger.NewAPIClient(cfg).MezonApi.MezonAuthenticate(context.Background(), swagger.ApiAuthenticateRequest{
+	token, _, err := api.MezonAuthenticate(context.Background(), swagger.ApiAuthenticateRequest{
 		Account: &swagger.ApiAccountApp{
 			Token: c.ApiKey,
 		},

@@ -1,41 +1,52 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"time"
 
 	mezonsdk "github.com/nccasia/mezon-go-sdk"
 	"github.com/nccasia/mezon-go-sdk/configs"
+	swagger "github.com/nccasia/mezon-go-sdk/mezon-api"
 	"github.com/nccasia/mezon-go-sdk/mezon-protobuf/mezon/v2/common/api"
 	"github.com/nccasia/mezon-go-sdk/mezon-protobuf/mezon/v2/common/rtapi"
+
+	"github.com/antihax/optional"
 )
 
 func main() {
-	conn, err := mezonsdk.NewWSConnection(&configs.Config{
-		// BasePath: "dev-mezon.nccsoft.vn:7305",
-		BasePath:     "api.mezon.vn",
-		ApiKey:       "7663586b61444979547175356a5a4d52",
+	client, err := mezonsdk.NewClient(&configs.Config{
+		BasePath: "dev-mezon.nccsoft.vn:7305",
+		//BasePath:     "api.mezon.vn",
+		ApiKey:       "xxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
 		Timeout:      10,
 		InsecureSkip: true,
 		UseSSL:       true,
-	}, "1827955317304987648")
+	})
+
 	if err != nil {
 		panic(err)
 	}
 
-	conn.SetOnPong(func(e *rtapi.Envelope) error {
+	socket, err := client.CreateSocket()
+
+	if err != nil {
+		panic(err)
+	}
+
+	socket.SetOnPong(func(e *rtapi.Envelope) error {
 		fmt.Printf("pong => cid: %s, message: %+v \n", e.Cid, e.GetPong())
 		return nil
 	})
 
 	time.Sleep(1 * time.Second)
 
-	conn.SetOnChannelMessage(func(e *rtapi.Envelope) error {
+	socket.SetOnChannelMessage(func(e *rtapi.Envelope) error {
 		fmt.Printf("messages => cid: %s, message: %+v \n", e.Cid, e.GetChannelMessage())
 		return nil
 	})
 
-	err = conn.SendMessage(&rtapi.Envelope{
+	err = socket.SendMessage(&rtapi.Envelope{
 		Message: &rtapi.Envelope_ChannelMessageSend{
 			ChannelMessageSend: &rtapi.ChannelMessageSend{
 				ClanId:           "1827955317304987648",
@@ -55,6 +66,16 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	data, _, err := client.Api.MezonListChannelVoiceUsers(context.Background(), &swagger.MezonListChannelVoiceUsersOpts{
+		ClanId:      optional.NewString("1827955317304987648"),
+		ChannelType: optional.NewInt32(4),
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("data: %+v \n", data)
 
 	select {}
 }
