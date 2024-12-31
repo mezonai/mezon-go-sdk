@@ -81,7 +81,7 @@ func (s *WSConnection) newWSConnection() error {
 	s.conn = conn
 
 	if err = s.joinClan(s.clanIds); err != nil {
-		log.Printf("WebSocket join clan: %s, err: %+v \n", err)
+		log.Printf("WebSocket join clan, err: %+v \n", err)
 		return err
 	}
 
