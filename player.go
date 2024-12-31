@@ -22,7 +22,7 @@ var (
 	MapStreamingRtcConn sync.Map // map[channelId]*RTCConnection
 )
 
-type StreamingRTCConn struct {
+type streamingRTCConn struct {
 	peer *webrtc.PeerConnection
 	ws   stn.IWSConnection
 
@@ -36,12 +36,12 @@ type StreamingRTCConn struct {
 	audioTrack *webrtc.TrackLocalStaticSample
 }
 
-type IStreamingRTCConnection interface {
+type AudioPlayer interface {
 	Play(filePath string) error
 	Close(channelId string)
 }
 
-func NewAudioPlayer(clanId, channelId, userId, username, token string) (IStreamingRTCConnection, error) {
+func NewAudioPlayer(clanId, channelId, userId, username, token string) (AudioPlayer, error) {
 	wsConn, err := stn.NewWSConnection(&configs.Config{
 		BasePath:     "stn.mezon.vn",
 		Timeout:      15,
@@ -94,7 +94,7 @@ func NewAudioPlayer(clanId, channelId, userId, username, token string) (IStreami
 	}()
 
 	// save to store
-	rtcConnection := &StreamingRTCConn{
+	rtcConnection := &streamingRTCConn{
 		peer:       peerConnection,
 		ws:         wsConn,
 		clanId:     clanId,
@@ -105,7 +105,7 @@ func NewAudioPlayer(clanId, channelId, userId, username, token string) (IStreami
 	}
 
 	// ws receive message handler ( on event )
-	wsConn.SetOnMessage(rtcConnection.onWebsocketEvent)
+	wsConn.SetOnMessage(rtcConnection.OnWebsocketEvent)
 	MapStreamingRtcConn.Store(channelId, rtcConnection)
 
 	peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
@@ -129,12 +129,12 @@ func NewAudioPlayer(clanId, channelId, userId, username, token string) (IStreami
 				return
 			}
 
-			if rtcConn.(*StreamingRTCConn).peer == nil {
+			if rtcConn.(*streamingRTCConn).peer == nil {
 				return
 			}
 
-			if rtcConn.(*StreamingRTCConn).peer.ConnectionState() != webrtc.PeerConnectionStateClosed {
-				rtcConn.(*StreamingRTCConn).peer.Close()
+			if rtcConn.(*streamingRTCConn).peer.ConnectionState() != webrtc.PeerConnectionStateClosed {
+				rtcConn.(*streamingRTCConn).peer.Close()
 			}
 
 			MapStreamingRtcConn.Delete(channelId)
@@ -150,24 +150,24 @@ func NewAudioPlayer(clanId, channelId, userId, username, token string) (IStreami
 	return rtcConnection, nil
 }
 
-func (c *StreamingRTCConn) Close(channelId string) {
+func (c *streamingRTCConn) Close(channelId string) {
 	rtcConn, ok := MapStreamingRtcConn.Load(channelId)
 	if !ok {
 		return
 	}
 
-	if rtcConn.(*StreamingRTCConn).peer == nil {
+	if rtcConn.(*streamingRTCConn).peer == nil {
 		return
 	}
 
-	if rtcConn.(*StreamingRTCConn).peer.ConnectionState() != webrtc.PeerConnectionStateClosed {
-		rtcConn.(*StreamingRTCConn).peer.Close()
+	if rtcConn.(*streamingRTCConn).peer.ConnectionState() != webrtc.PeerConnectionStateClosed {
+		rtcConn.(*streamingRTCConn).peer.Close()
 	}
 
 	MapStreamingRtcConn.Delete(channelId)
 }
 
-func (c *StreamingRTCConn) onWebsocketEvent(event *stn.WsMsg) error {
+func (c *streamingRTCConn) OnWebsocketEvent(event *stn.WsMsg) error {
 
 	// TODO: fix hardcode
 	switch event.Key {
@@ -199,7 +199,7 @@ func (c *StreamingRTCConn) onWebsocketEvent(event *stn.WsMsg) error {
 	return nil
 }
 
-func (c *StreamingRTCConn) sendOffer() error {
+func (c *streamingRTCConn) sendOffer() error {
 	offer, err := c.peer.CreateOffer(nil)
 	if err != nil {
 		return err
@@ -221,7 +221,7 @@ func (c *StreamingRTCConn) sendOffer() error {
 	})
 }
 
-func (c *StreamingRTCConn) onICECandidate(i *webrtc.ICECandidate, clanId, channelId, userId, username string) error {
+func (c *streamingRTCConn) onICECandidate(i *webrtc.ICECandidate, clanId, channelId, userId, username string) error {
 	if i == nil {
 		return nil
 	}
@@ -242,11 +242,11 @@ func (c *StreamingRTCConn) onICECandidate(i *webrtc.ICECandidate, clanId, channe
 	})
 }
 
-func (c *StreamingRTCConn) addICECandidate(i webrtc.ICECandidateInit) error {
+func (c *streamingRTCConn) addICECandidate(i webrtc.ICECandidateInit) error {
 	return c.peer.AddICECandidate(i)
 }
 
-func (c *StreamingRTCConn) Play(filePath string) error {
+func (c *streamingRTCConn) Play(filePath string) error {
 
 	// Open a OGG file and start reading using our OGGReader
 	file, oggErr := os.Open(filePath)
