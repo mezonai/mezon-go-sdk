@@ -85,7 +85,7 @@ func (s *WSConnection) newWSConnection() error {
 		return err
 	}
 
-	s.reconnect()
+	// s.reconnect()
 	s.pingPong()
 	s.recvMessage()
 
@@ -148,6 +148,7 @@ func (s *WSConnection) pingPong() {
 					if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) ||
 						websocket.IsUnexpectedCloseError(err) {
 						log.Println("WebSocket connection closed:", err)
+						s.reconnect()
 						return
 					}
 					continue

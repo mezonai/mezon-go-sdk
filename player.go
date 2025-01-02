@@ -1,6 +1,7 @@
 package mezonsdk
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,11 +35,14 @@ type streamingRTCConn struct {
 	// TODO: streaming video (#rapchieuphim)
 	// videoTrack *webrtc.TrackLocalStaticRTP
 	audioTrack *webrtc.TrackLocalStaticSample
+	ctx        context.Context
+	cancelFunc context.CancelFunc
 }
 
 type AudioPlayer interface {
 	Play(filePath string) error
 	Close(channelId string)
+	Cancel(channelId string)
 }
 
 func NewAudioPlayer(clanId, channelId, userId, username, token string) (AudioPlayer, error) {
@@ -46,7 +50,7 @@ func NewAudioPlayer(clanId, channelId, userId, username, token string) (AudioPla
 		BasePath:     "stn.mezon.vn",
 		Timeout:      15,
 		InsecureSkip: true,
-		UseSSL:       true,
+		UseSSL:       false,
 	}, channelId, username, token)
 
 	config := webrtc.Configuration{
@@ -93,6 +97,8 @@ func NewAudioPlayer(clanId, channelId, userId, username, token string) (AudioPla
 		}
 	}()
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	// save to store
 	rtcConnection := &streamingRTCConn{
 		peer:       peerConnection,
@@ -102,6 +108,8 @@ func NewAudioPlayer(clanId, channelId, userId, username, token string) (AudioPla
 		userId:     userId,
 		username:   username,
 		audioTrack: audioTrack,
+		ctx:        ctx,
+		cancelFunc: cancel,
 	}
 
 	// ws receive message handler ( on event )
@@ -137,6 +145,8 @@ func NewAudioPlayer(clanId, channelId, userId, username, token string) (AudioPla
 				rtcConn.(*streamingRTCConn).peer.Close()
 			}
 
+			rtcConn.(*streamingRTCConn).cancel()
+
 			MapStreamingRtcConn.Delete(channelId)
 		}
 	})
@@ -163,8 +173,25 @@ func (c *streamingRTCConn) Close(channelId string) {
 	if rtcConn.(*streamingRTCConn).peer.ConnectionState() != webrtc.PeerConnectionStateClosed {
 		rtcConn.(*streamingRTCConn).peer.Close()
 	}
+	rtcConn.(*streamingRTCConn).cancel()
 
 	MapStreamingRtcConn.Delete(channelId)
+}
+
+func (c *streamingRTCConn) Cancel(channelId string) {
+	rtcConn, ok := MapStreamingRtcConn.Load(channelId)
+	if !ok {
+		return
+	}
+	rtcConn.(*streamingRTCConn).cancel()
+}
+
+func (c *streamingRTCConn) cancel() {
+	if c.cancelFunc != nil {
+		c.cancelFunc()
+	}
+
+	c.ctx, c.cancelFunc = context.WithCancel(context.Background())
 }
 
 func (c *streamingRTCConn) OnWebsocketEvent(event *stn.WsMsg) error {
@@ -253,6 +280,7 @@ func (c *streamingRTCConn) Play(filePath string) error {
 	if oggErr != nil {
 		return oggErr
 	}
+	defer file.Close()
 
 	// Open on oggfile in non-checksum mode.
 	ogg, _, oggErr := oggreader.NewWith(file)
@@ -268,26 +296,32 @@ func (c *streamingRTCConn) Play(filePath string) error {
 	// * works around latency issues with Sleep (see https://github.com/golang/go/issues/44343)
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
-	for ; true; <-ticker.C {
-		pageData, pageHeader, oggErr := ogg.ParseNextPage()
-		if errors.Is(oggErr, io.EOF) {
-			log.Println("All audio pages parsed and sent")
+
+	c.cancel()
+
+	for {
+		select {
+		case <-c.ctx.Done():
 			return nil
-		}
+		case <-ticker.C:
+			pageData, pageHeader, oggErr := ogg.ParseNextPage()
+			if errors.Is(oggErr, io.EOF) {
+				log.Println("All audio pages parsed and sent")
+				return nil
+			}
 
-		if oggErr != nil {
-			return oggErr
-		}
+			if oggErr != nil {
+				return oggErr
+			}
 
-		// The amount of samples is the difference between the last and current timestamp
-		sampleCount := float64(pageHeader.GranulePosition - lastGranule)
-		lastGranule = pageHeader.GranulePosition
-		sampleDuration := time.Duration((sampleCount/48000)*1000) * time.Millisecond
+			// The amount of samples is the difference between the last and current timestamp
+			sampleCount := float64(pageHeader.GranulePosition - lastGranule)
+			lastGranule = pageHeader.GranulePosition
+			sampleDuration := time.Duration((sampleCount/48000)*1000) * time.Millisecond
 
-		if oggErr = c.audioTrack.WriteSample(media.Sample{Data: pageData, Duration: sampleDuration}); oggErr != nil {
-			return oggErr
+			if oggErr = c.audioTrack.WriteSample(media.Sample{Data: pageData, Duration: sampleDuration}); oggErr != nil {
+				return oggErr
+			}
 		}
 	}
-	return nil
-
 }
