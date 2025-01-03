@@ -23,8 +23,7 @@ var (
 )
 
 type streamingRTCConn struct {
-	peer *webrtc.PeerConnection
-	ws   stn.IWSConnection
+	stnWs stn.IWSConnection
 
 	clanId    string
 	channelId string
@@ -34,6 +33,17 @@ type streamingRTCConn struct {
 	// TODO: streaming video (#rapchieuphim)
 	// videoTrack *webrtc.TrackLocalStaticRTP
 	audioTrack *webrtc.TrackLocalStaticSample
+	audiences  map[string]*webrtc.PeerConnection
+}
+
+var config = webrtc.Configuration{
+	ICEServers: []webrtc.ICEServer{
+		{
+			URLs:       []string{"turn:turn.mezon.vn:5349", "stun:stun.l.google.com:19302"},
+			Username:   "turnmezon",
+			Credential: "QuTs4zUEcbylWemXL7MK",
+		},
+	},
 }
 
 type AudioPlayer interface {
@@ -42,24 +52,12 @@ type AudioPlayer interface {
 }
 
 func NewAudioPlayer(clanId, channelId, userId, username, token string) (AudioPlayer, error) {
-	wsConn, err := stn.NewWSConnection(&configs.Config{
+	stnConn, err := stn.NewWSConnection(&configs.Config{
 		BasePath:     "stn.mezon.vn",
 		Timeout:      15,
 		InsecureSkip: true,
 		UseSSL:       true,
 	}, channelId, username, token)
-
-	config := webrtc.Configuration{
-		ICEServers: []webrtc.ICEServer{
-			{
-				URLs: []string{"stun:stun.l.google.com:19302"},
-			},
-		},
-	}
-	peerConnection, err := webrtc.NewPeerConnection(config)
-	if err != nil {
-		return nil, err
-	}
 
 	// // Create a video track
 	// videoTrack, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8}, fmt.Sprintf("video_vp8_%s", channelId), fmt.Sprintf("video_vp8_%s", channelId))
@@ -76,7 +74,7 @@ func NewAudioPlayer(clanId, channelId, userId, username, token string) (AudioPla
 	if err != nil {
 		return nil, err
 	}
-	rtpSender, err := peerConnection.AddTrack(audioTrack)
+	rtpSender, err := publisher.AddTrack(audioTrack)
 	if err != nil {
 		return nil, err
 	}
@@ -95,8 +93,7 @@ func NewAudioPlayer(clanId, channelId, userId, username, token string) (AudioPla
 
 	// save to store
 	rtcConnection := &streamingRTCConn{
-		peer:       peerConnection,
-		ws:         wsConn,
+		stnWs:      stnConn,
 		clanId:     clanId,
 		channelId:  channelId,
 		userId:     userId,
@@ -105,7 +102,7 @@ func NewAudioPlayer(clanId, channelId, userId, username, token string) (AudioPla
 	}
 
 	// ws receive message handler ( on event )
-	wsConn.SetOnMessage(rtcConnection.OnWebsocketEvent)
+	stnConn.SetOnMessage(rtcConnection.OnWebsocketEvent)
 	MapStreamingRtcConn.Store(channelId, rtcConnection)
 
 	peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
@@ -115,7 +112,7 @@ func NewAudioPlayer(clanId, channelId, userId, username, token string) (AudioPla
 		case webrtc.ICEConnectionStateConnected:
 			// TODO: event ice connected
 			jsonData, _ := json.Marshal(map[string]string{"ChannelId": channelId})
-			wsConn.SendMessage(&stn.WsMsg{
+			stnConn.SendMessage(&stn.WsMsg{
 				ClanId:    clanId,
 				ChannelId: channelId,
 				Key:       "connect_publisher",
@@ -169,11 +166,24 @@ func (c *streamingRTCConn) Close(channelId string) {
 
 func (c *streamingRTCConn) OnWebsocketEvent(event *stn.WsMsg) error {
 
-	// TODO: fix hardcode
 	switch event.Key {
+	case "session_subscriber":
+		// receive offer from subscriber
+		var offer webrtc.SessionDescription
+		err := json.Unmarshal(event.Value, &offer)
+		if err != nil {
+			return err
+		}
+		pc, err := webrtc.NewPeerConnection(config)
+		if err := pc.SetRemoteDescription(offer); err != nil {
+			return err
+		}
+		// If there is no error, send a success message
+		c.stnWs.SendMessage(&stn.WsMsg{
+			ClientId: event.ClientId,
+		})
+
 	case "sd_answer":
-		// unzipData, _ := utils.GzipUncompress(eventData.JsonData)
-		// var answer webrtc.SessionDescription
 		var answerSDP string
 		err := json.Unmarshal(event.Value, &answerSDP)
 		if err != nil {
@@ -211,7 +221,7 @@ func (c *streamingRTCConn) sendOffer() error {
 	byteJson, _ := json.Marshal(offer)
 
 	// send socket signaling, gzip compress data
-	return c.ws.SendMessage(&stn.WsMsg{
+	return c.stnWs.SendMessage(&stn.WsMsg{
 		Key:       "session_publisher",
 		ClanId:    c.clanId,
 		ChannelId: c.channelId,
@@ -232,7 +242,7 @@ func (c *streamingRTCConn) onICECandidate(i *webrtc.ICECandidate, clanId, channe
 		return err
 	}
 
-	return c.ws.SendMessage(&stn.WsMsg{
+	return c.stnWs.SendMessage(&stn.WsMsg{
 		Key:       "ice_candidate",
 		Value:     candidateString,
 		ClanId:    clanId,
@@ -289,5 +299,4 @@ func (c *streamingRTCConn) Play(filePath string) error {
 		}
 	}
 	return nil
-
 }
