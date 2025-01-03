@@ -74,22 +74,6 @@ func NewAudioPlayer(clanId, channelId, userId, username, token string) (AudioPla
 	if err != nil {
 		return nil, err
 	}
-	rtpSender, err := publisher.AddTrack(audioTrack)
-	if err != nil {
-		return nil, err
-	}
-
-	// Read incoming RTCP packets
-	// Before these packets are returned they are processed by interceptors. For things
-	// like NACK this needs to be called.
-	go func() {
-		rtcpBuf := make([]byte, 1500)
-		for {
-			if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
-				return
-			}
-		}
-	}()
 
 	// save to store
 	rtcConnection := &streamingRTCConn{
@@ -105,44 +89,7 @@ func NewAudioPlayer(clanId, channelId, userId, username, token string) (AudioPla
 	stnConn.SetOnMessage(rtcConnection.OnWebsocketEvent)
 	MapStreamingRtcConn.Store(channelId, rtcConnection)
 
-	peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-		log.Printf("Connection State has changed %s \n", state.String())
-
-		switch state {
-		case webrtc.ICEConnectionStateConnected:
-			// TODO: event ice connected
-			jsonData, _ := json.Marshal(map[string]string{"ChannelId": channelId})
-			stnConn.SendMessage(&stn.WsMsg{
-				ClanId:    clanId,
-				ChannelId: channelId,
-				Key:       "connect_publisher",
-				Value:     jsonData,
-				UserId:    userId,
-				Username:  username,
-			})
-		case webrtc.ICEConnectionStateClosed:
-			rtcConn, ok := MapStreamingRtcConn.Load(channelId)
-			if !ok {
-				return
-			}
-
-			if rtcConn.(*streamingRTCConn).peer == nil {
-				return
-			}
-
-			if rtcConn.(*streamingRTCConn).peer.ConnectionState() != webrtc.PeerConnectionStateClosed {
-				rtcConn.(*streamingRTCConn).peer.Close()
-			}
-
-			MapStreamingRtcConn.Delete(channelId)
-		}
-	})
-	peerConnection.OnICECandidate(func(i *webrtc.ICECandidate) {
-		rtcConnection.onICECandidate(i, channelId, clanId, userId, username)
-	})
-
-	// send offer
-	rtcConnection.sendOffer()
+	rtcConnection.audioTrack = audioTrack
 
 	return rtcConnection, nil
 }
@@ -174,10 +121,8 @@ func (c *streamingRTCConn) OnWebsocketEvent(event *stn.WsMsg) error {
 		if err != nil {
 			return err
 		}
-		pc, err := webrtc.NewPeerConnection(config)
-		if err := pc.SetRemoteDescription(offer); err != nil {
-			return err
-		}
+		pc, err := c.createPeerConnection(&offer)
+
 		// If there is no error, send a success message
 		c.stnWs.SendMessage(&stn.WsMsg{
 			ClientId: event.ClientId,
@@ -299,4 +244,64 @@ func (c *streamingRTCConn) Play(filePath string) error {
 		}
 	}
 	return nil
+}
+
+func (c *streamingRTCConn) createPeerConnection(offer *webrtc.SessionDescription) error {
+	pc, err := webrtc.NewPeerConnection(config)
+	if err != nil {
+		return err
+	}
+	if err := pc.SetRemoteDescription(*offer); err != nil {
+		return err
+	}
+	rtpSender, err := pc.AddTrack(c.audioTrack)
+	if err != nil {
+		return err
+	}
+
+	// Read incoming RTCP packets
+	// Before these packets are returned they are processed by interceptors. For things
+	// like NACK this needs to be called.
+	go func() {
+		rtcpBuf := make([]byte, 1500)
+		for {
+			if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+				return
+			}
+		}
+	}()
+
+	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+		log.Printf("Connection State has changed %s \n", state.String())
+
+		switch state {
+		case webrtc.ICEConnectionStateConnected:
+			// TODO: event ice connected
+			jsonData, _ := json.Marshal(map[string]string{"ChannelId": c.channelId})
+			c.stnWs.SendMessage(&stn.WsMsg{
+				ClanId:    c.clanId,
+				ChannelId: c.channelId,
+				Key:       "connect_publisher",
+				Value:     jsonData,
+				UserId:    c.userId,
+			})
+		case webrtc.ICEConnectionStateClosed:
+			rtcConn, ok := MapStreamingRtcConn.Load(c.channelId)
+			if !ok {
+				return
+			}
+
+			if rtcConn.(*streamingRTCConn).peer.ConnectionState() != webrtc.PeerConnectionStateClosed {
+				rtcConn.(*streamingRTCConn).peer.Close()
+			}
+
+			MapStreamingRtcConn.Delete(channelId)
+		}
+	})
+	peerConnection.OnICECandidate(func(i *webrtc.ICECandidate) {
+		rtcConnection.onICECandidate(i, channelId, clanId, userId, username)
+	})
+
+	// send offer
+	rtcConnection.sendOffer()
 }
