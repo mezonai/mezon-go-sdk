@@ -48,17 +48,10 @@ type IWSConnection interface {
 // TODO: implement (TODO) for IWSConnection
 func NewWSConnection(c *configs.Config, channelId, username, token string) (IWSConnection, error) {
 
-	// TODO: authenticate token for ws
-	// token, err := getAuthenticate(c)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
 	client := &WSConnection{
 		username: username,
 		token:    token,
-		basePath: utils.GetBasePath("wss", c.BasePath, c.UseSSL),
-		// basePath:  utils.GetBasePath("ws", c.BasePath, c.UseSSL),
+		basePath: utils.GetBasePath("ws", c.BasePath, c.UseSSL),
 		//clanId:    clanId,
 		onMessage: recvDefaultHandler,
 	}

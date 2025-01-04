@@ -51,11 +51,14 @@ type AudioPlayer interface {
 
 func NewAudioPlayer(clanId, channelId, userId, username, token string) (AudioPlayer, error) {
 	stnConn, err := stn.NewWSConnection(&configs.Config{
-		BasePath:     "stn.mezon.vn",
+		BasePath:     "localhost:8081", //"stn.mezon.vn",
 		Timeout:      15,
 		InsecureSkip: true,
-		UseSSL:       true,
+		UseSSL:       false, //true,
 	}, channelId, username, token)
+	if err != nil {
+		return nil, err
+	}
 
 	// // Create a video track
 	// videoTrack, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8}, fmt.Sprintf("video_vp8_%s", channelId), fmt.Sprintf("video_vp8_%s", channelId))
