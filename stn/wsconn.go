@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/nccasia/mezon-go-sdk/configs"
@@ -85,7 +86,6 @@ func (s *WSConnection) newWSConnection() error {
 
 	s.conn = conn
 
-	s.reconnect()
 	s.pingPong()
 	s.recvMessage()
 
@@ -111,10 +111,37 @@ func (s *WSConnection) SendMessage(data *WsMsg) error {
 func (s *WSConnection) pingPong() {
 	// Ping Handler
 	// TODO:
+	go func() {
+		for {
+			select {
+			case <-time.After(30 * time.Second):
+				err := s.conn.WriteMessage(websocket.PingMessage, nil)
+				if err != nil {
+					log.Println("Failed to send ping:", err)
+					return
+				}
+			}
+		}
+	}()
 }
 
 func (s *WSConnection) reconnect() {
 	// TODO:
+	maxRetries := 3
+	retryDelay := time.Second * 5
+
+	for i := 0; i < maxRetries; i++ {
+		log.Printf("Reconnecting... attempt %d/%d", i+1, maxRetries)
+
+		err := s.newWSConnection()
+		if err == nil {
+			log.Println("Reconnected successfully!")
+			return
+		}
+
+		time.Sleep(retryDelay)
+	}
+
 }
 
 func (s *WSConnection) recvMessage() {
@@ -125,6 +152,7 @@ func (s *WSConnection) recvMessage() {
 				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) ||
 					websocket.IsUnexpectedCloseError(err) {
 					log.Println("WebSocket connection closed:", err)
+					s.reconnect()
 					return
 				}
 				continue
