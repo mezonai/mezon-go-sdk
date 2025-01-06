@@ -21,7 +21,7 @@ func main() {
 		return
 	}
 
-	err = player.Play("")
+	err = player.Play("output.ogg")
 
 	return // stop testing
 

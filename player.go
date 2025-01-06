@@ -2,6 +2,7 @@ package mezonsdk
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nccasia/mezon-go-sdk/configs"
-	"github.com/nccasia/mezon-go-sdk/stn"
+	"github.com/gorilla/websocket"
+	"github.com/nccasia/mezon-go-sdk/utils"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 	"github.com/pion/webrtc/v4/pkg/media/oggreader"
@@ -23,11 +24,23 @@ var (
 	MapStreamingRtcConn sync.Map // map[channelId]*RTCConnection
 )
 
-type streamingRTCConn struct {
-	stnWs stn.IWSConnection
+type WsMsg struct {
+	Key         string
+	ClanId      string
+	ChannelId   string
+	UserId      string
+	Username    string
+	ClientId    string
+	IsPublisher bool
+	State       int
+	Value       json.RawMessage
+}
 
+type streamingRTCConn struct {
 	clanId    string
 	channelId string
+	username  string
+	token     string
 
 	// TODO: streaming video (#rapchieuphim)
 	// videoTrack *webrtc.TrackLocalStaticRTP
@@ -36,6 +49,8 @@ type streamingRTCConn struct {
 
 	ctx        context.Context
 	cancelFunc context.CancelFunc
+
+	wsconn *websocket.Conn
 }
 
 var config = webrtc.Configuration{
@@ -55,16 +70,6 @@ type AudioPlayer interface {
 }
 
 func NewAudioPlayer(clanId, channelId, userId, username, token string) (AudioPlayer, error) {
-	stnConn, err := stn.NewWSConnection(&configs.Config{
-		BasePath:     "localhost:8081", //"stn.mezon.vn",
-		Timeout:      15,
-		InsecureSkip: true,
-		UseSSL:       false,
-	}, channelId, username, token)
-	if err != nil {
-		return nil, err
-	}
-
 	// // Create a video track
 	// videoTrack, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8}, fmt.Sprintf("video_vp8_%s", channelId), fmt.Sprintf("video_vp8_%s", channelId))
 	// if err != nil {
@@ -85,16 +90,15 @@ func NewAudioPlayer(clanId, channelId, userId, username, token string) (AudioPla
 
 	// save to store
 	rtcConnection := &streamingRTCConn{
-		stnWs:      stnConn,
 		clanId:     clanId,
+		username:   username,
+		token:      token,
 		channelId:  channelId,
 		audioTrack: audioTrack,
 		ctx:        ctx,
 		cancelFunc: cancel,
 	}
 
-	// ws receive message handler ( on event )
-	stnConn.SetOnMessage(rtcConnection.OnWebsocketEvent)
 	MapStreamingRtcConn.Store(channelId, rtcConnection)
 
 	rtcConnection.audioTrack = audioTrack
@@ -102,7 +106,7 @@ func NewAudioPlayer(clanId, channelId, userId, username, token string) (AudioPla
 	return rtcConnection, nil
 }
 
-func (c *streamingRTCConn) Close(channelId string) {
+func (s *streamingRTCConn) Close(channelId string) {
 	rtcConn, ok := MapStreamingRtcConn.Load(channelId)
 	if !ok {
 		return
@@ -118,7 +122,7 @@ func (c *streamingRTCConn) Close(channelId string) {
 	MapStreamingRtcConn.Delete(channelId)
 }
 
-func (c *streamingRTCConn) Cancel(channelId string) {
+func (s *streamingRTCConn) Cancel(channelId string) {
 	rtcConn, ok := MapStreamingRtcConn.Load(channelId)
 	if !ok {
 		return
@@ -126,15 +130,15 @@ func (c *streamingRTCConn) Cancel(channelId string) {
 	rtcConn.(*streamingRTCConn).cancel()
 }
 
-func (c *streamingRTCConn) cancel() {
-	if c.cancelFunc != nil {
-		c.cancelFunc()
+func (s *streamingRTCConn) cancel() {
+	if s.cancelFunc != nil {
+		s.cancelFunc()
 	}
 
-	c.ctx, c.cancelFunc = context.WithCancel(context.Background())
+	s.ctx, s.cancelFunc = context.WithCancel(context.Background())
 }
 
-func (c *streamingRTCConn) OnWebsocketEvent(event *stn.WsMsg) error {
+func (s *streamingRTCConn) OnWebsocketEvent(event *WsMsg) error {
 
 	switch event.Key {
 	case "session_subscriber":
@@ -144,7 +148,7 @@ func (c *streamingRTCConn) OnWebsocketEvent(event *stn.WsMsg) error {
 		if err != nil {
 			return err
 		}
-		_, err = c.createPeerConnection(&offer, event.ClientId)
+		_, err = s.createPeerConnection(&offer, event.ClientId)
 		if err != nil {
 			return err
 		}
@@ -157,13 +161,13 @@ func (c *streamingRTCConn) OnWebsocketEvent(event *stn.WsMsg) error {
 			return err
 		}
 
-		return c.addICECandidate(i, event.ClientId)
+		return s.addICECandidate(i, event.ClientId)
 	}
 
 	return nil
 }
 
-func (c *streamingRTCConn) sendAnswer(pc *webrtc.PeerConnection) error {
+func (s *streamingRTCConn) sendAnswer(pc *webrtc.PeerConnection) error {
 	answer, err := pc.CreateAnswer(nil)
 	if err != nil {
 		return err
@@ -174,15 +178,15 @@ func (c *streamingRTCConn) sendAnswer(pc *webrtc.PeerConnection) error {
 
 	byteJson, _ := json.Marshal(answer)
 
-	return c.stnWs.SendMessage(&stn.WsMsg{
+	return s.sendMessage(&WsMsg{
 		Key:       "sd_answer",
-		ClanId:    c.clanId,
-		ChannelId: c.channelId,
+		ClanId:    s.clanId,
+		ChannelId: s.channelId,
 		Value:     byteJson,
 	})
 }
 
-func (c *streamingRTCConn) onICECandidate(i *webrtc.ICECandidate, clanId, channelId, clientId string) error {
+func (s *streamingRTCConn) onICECandidate(i *webrtc.ICECandidate, clanId, channelId, clientId string) error {
 	if i == nil {
 		return nil
 	}
@@ -193,7 +197,7 @@ func (c *streamingRTCConn) onICECandidate(i *webrtc.ICECandidate, clanId, channe
 		return err
 	}
 
-	return c.stnWs.SendMessage(&stn.WsMsg{
+	return s.sendMessage(&WsMsg{
 		Key:       "ice_candidate",
 		Value:     candidateString,
 		ClanId:    clanId,
@@ -202,15 +206,71 @@ func (c *streamingRTCConn) onICECandidate(i *webrtc.ICECandidate, clanId, channe
 	})
 }
 
-func (c *streamingRTCConn) addICECandidate(i webrtc.ICECandidateInit, clientId string) error {
+func (s *streamingRTCConn) addICECandidate(i webrtc.ICECandidateInit, clientId string) error {
 	var err error
-	if peer, ok := c.audiences[clientId]; ok {
+	if peer, ok := s.audiences[clientId]; ok {
 		err = peer.AddICECandidate(i)
 	}
 	return err
 }
 
-func (c *streamingRTCConn) Play(filePath string) error {
+func (s *streamingRTCConn) Play(filePath string) error {
+	basePath := "localhost:8081" //"stn.mezon.vn"
+	insecureSkip := true
+	useSSL := false
+	var dialer *websocket.Dialer
+	if insecureSkip {
+		tlsConfig := &tls.Config{
+			InsecureSkipVerify: true,
+		}
+		dialer = &websocket.Dialer{
+			TLSClientConfig: tlsConfig,
+		}
+	} else {
+		dialer = websocket.DefaultDialer
+	}
+	basePath = utils.GetBasePath("ws", basePath, useSSL)
+
+	conn, _, err := dialer.Dial(fmt.Sprintf("%s/ws?username=%s&token=%s", basePath, s.username, s.token), nil)
+	if err != nil {
+		log.Println("WebSocket connection open err: ", err)
+		return err
+	}
+
+	s.wsconn = conn
+	s.connectPublisher()
+
+	go func() {
+		for {
+			conn.ReadMessage()
+			msgType, databytes, err := conn.ReadMessage()
+			if err != nil {
+				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) ||
+					websocket.IsUnexpectedCloseError(err) {
+					log.Println("WebSocket connection closed:", err)
+					return
+				}
+				continue
+			}
+
+			if msgType != websocket.TextMessage {
+				log.Println("unknown message type: ", msgType)
+				continue
+			}
+
+			var msg WsMsg
+			err = json.Unmarshal(databytes, &msg)
+			if err != nil {
+				log.Println("can't unmarshal json data: ", string(databytes))
+				continue
+			}
+
+			if err := s.OnWebsocketEvent(&msg); err != nil {
+				log.Println("on message error: ", err.Error())
+				continue
+			}
+		}
+	}()
 
 	// Open a OGG file and start reading using our OGGReader
 	file, oggErr := os.Open(filePath)
@@ -234,11 +294,9 @@ func (c *streamingRTCConn) Play(filePath string) error {
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
 
-	c.cancel()
-
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-s.ctx.Done():
 			return nil
 		case <-ticker.C:
 			pageData, pageHeader, oggErr := ogg.ParseNextPage()
@@ -256,14 +314,14 @@ func (c *streamingRTCConn) Play(filePath string) error {
 			lastGranule = pageHeader.GranulePosition
 			sampleDuration := time.Duration((sampleCount/48000)*1000) * time.Millisecond
 
-			if oggErr = c.audioTrack.WriteSample(media.Sample{Data: pageData, Duration: sampleDuration}); oggErr != nil {
+			if oggErr = s.audioTrack.WriteSample(media.Sample{Data: pageData, Duration: sampleDuration}); oggErr != nil {
 				return oggErr
 			}
 		}
 	}
 }
 
-func (c *streamingRTCConn) createPeerConnection(offer *webrtc.SessionDescription, clientId string) (*webrtc.PeerConnection, error) {
+func (s *streamingRTCConn) createPeerConnection(offer *webrtc.SessionDescription, clientId string) (*webrtc.PeerConnection, error) {
 	pc, err := webrtc.NewPeerConnection(config)
 	if err != nil {
 		return nil, err
@@ -271,7 +329,7 @@ func (c *streamingRTCConn) createPeerConnection(offer *webrtc.SessionDescription
 	if err := pc.SetRemoteDescription(*offer); err != nil {
 		return nil, err
 	}
-	rtpSender, err := pc.AddTrack(c.audioTrack)
+	rtpSender, err := pc.AddTrack(s.audioTrack)
 	if err != nil {
 		return nil, err
 	}
@@ -293,9 +351,9 @@ func (c *streamingRTCConn) createPeerConnection(offer *webrtc.SessionDescription
 
 		switch state {
 		case webrtc.ICEConnectionStateConnected, webrtc.ICEConnectionStateClosed:
-			c.stnWs.SendMessage(&stn.WsMsg{
-				ClanId:    c.clanId,
-				ChannelId: c.channelId,
+			s.sendMessage(&WsMsg{
+				ClanId:    s.clanId,
+				ChannelId: s.channelId,
 				Key:       "session_state_changed",
 				ClientId:  clientId,
 				State:     int(state),
@@ -304,10 +362,28 @@ func (c *streamingRTCConn) createPeerConnection(offer *webrtc.SessionDescription
 	})
 
 	pc.OnICECandidate(func(i *webrtc.ICECandidate) {
-		c.onICECandidate(i, c.channelId, c.clanId, clientId)
+		s.onICECandidate(i, s.channelId, s.clanId, clientId)
 	})
 
-	c.sendAnswer(pc)
+	s.sendAnswer(pc)
 
 	return pc, nil
+}
+
+func (s *streamingRTCConn) connectPublisher() {
+	s.sendMessage(&WsMsg{
+		Key:       "connect_publisher",
+		ClanId:    s.clanId,
+		ChannelId: s.channelId,
+		UserId:    s.username,
+	})
+}
+
+func (s *streamingRTCConn) sendMessage(data *WsMsg) error {
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+
+	return s.wsconn.WriteMessage(websocket.TextMessage, jsonData)
 }
