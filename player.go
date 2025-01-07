@@ -141,13 +141,13 @@ func (s *streamingRTCConn) cancel() {
 }
 
 func (s *streamingRTCConn) OnWebsocketEvent(event *WsMsg) error {
-
 	switch event.Key {
 	case "session_subscriber":
 		// receive offer from subscriber
 		var offer webrtc.SessionDescription
 		err := json.Unmarshal(event.Value, &offer)
 		if err != nil {
+			log.Println("unmarshal err: ", err)
 			return err
 		}
 		_, err = s.createPeerConnection(&offer, event.ClientId)
@@ -249,9 +249,9 @@ func (s *streamingRTCConn) Play(filePath string) error {
 
 	go func() {
 		for {
-			conn.ReadMessage()
 			msgType, databytes, err := conn.ReadMessage()
 			if err != nil {
+				log.Println("read error", err)
 				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) ||
 					websocket.IsUnexpectedCloseError(err) {
 					log.Println("WebSocket connection closed:", err)
@@ -329,6 +329,7 @@ func (s *streamingRTCConn) Play(filePath string) error {
 }
 
 func (s *streamingRTCConn) createPeerConnection(offer *webrtc.SessionDescription, clientId string) (*webrtc.PeerConnection, error) {
+	log.Printf("createPeerConnection %s \n", clientId)
 	pc, err := webrtc.NewPeerConnection(config)
 	if err != nil {
 		return nil, err
