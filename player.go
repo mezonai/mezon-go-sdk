@@ -167,7 +167,7 @@ func (s *streamingRTCConn) OnWebsocketEvent(event *WsMsg) error {
 	return nil
 }
 
-func (s *streamingRTCConn) sendAnswer(pc *webrtc.PeerConnection) error {
+func (s *streamingRTCConn) sendAnswer(pc *webrtc.PeerConnection, clientId string) error {
 	answer, err := pc.CreateAnswer(nil)
 	if err != nil {
 		return err
@@ -176,12 +176,13 @@ func (s *streamingRTCConn) sendAnswer(pc *webrtc.PeerConnection) error {
 		return err
 	}
 
-	byteJson, _ := json.Marshal(answer)
+	byteJson, _ := json.Marshal(answer.SDP)
 
 	return s.sendMessage(&WsMsg{
 		Key:       "sd_answer",
 		ClanId:    s.clanId,
 		ChannelId: s.channelId,
+		ClientId:  clientId,
 		Value:     byteJson,
 	})
 }
@@ -334,6 +335,8 @@ func (s *streamingRTCConn) createPeerConnection(offer *webrtc.SessionDescription
 		return nil, err
 	}
 
+	s.sendAnswer(pc, clientId)
+
 	// Read incoming RTCP packets
 	// Before these packets are returned they are processed by interceptors. For things
 	// like NACK this needs to be called.
@@ -364,8 +367,6 @@ func (s *streamingRTCConn) createPeerConnection(offer *webrtc.SessionDescription
 	pc.OnICECandidate(func(i *webrtc.ICECandidate) {
 		s.onICECandidate(i, s.channelId, s.clanId, clientId)
 	})
-
-	s.sendAnswer(pc)
 
 	return pc, nil
 }
