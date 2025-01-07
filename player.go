@@ -97,6 +97,7 @@ func NewAudioPlayer(clanId, channelId, userId, username, token string) (AudioPla
 		audioTrack: audioTrack,
 		ctx:        ctx,
 		cancelFunc: cancel,
+		audiences:  make(map[string]*webrtc.PeerConnection),
 	}
 
 	MapStreamingRtcConn.Store(channelId, rtcConnection)
@@ -123,11 +124,12 @@ func (s *streamingRTCConn) Close(channelId string) {
 }
 
 func (s *streamingRTCConn) Cancel(channelId string) {
-	rtcConn, ok := MapStreamingRtcConn.Load(channelId)
-	if !ok {
-		return
-	}
-	rtcConn.(*streamingRTCConn).cancel()
+	s.sendMessage(&WsMsg{
+		Key:       "stop_publisher",
+		ClanId:    s.clanId,
+		ChannelId: s.channelId,
+	})
+	s.cancel()
 }
 
 func (s *streamingRTCConn) cancel() {
@@ -150,11 +152,10 @@ func (s *streamingRTCConn) OnWebsocketEvent(event *WsMsg) error {
 		}
 		_, err = s.createPeerConnection(&offer, event.ClientId)
 		if err != nil {
+			log.Println("session subscriber err: ", err)
 			return err
 		}
-
 	case "ice_candidate":
-
 		var i webrtc.ICECandidateInit
 		err := json.Unmarshal(event.Value, &i)
 		if err != nil {
@@ -167,7 +168,11 @@ func (s *streamingRTCConn) OnWebsocketEvent(event *WsMsg) error {
 	return nil
 }
 
-func (s *streamingRTCConn) sendAnswer(pc *webrtc.PeerConnection, clientId string) error {
+func (s *streamingRTCConn) sendAnswer(clientId string) error {
+	pc, ok := s.audiences[clientId]
+	if !ok {
+		return errors.New("not init audience")
+	}
 	answer, err := pc.CreateAnswer(nil)
 	if err != nil {
 		return err
@@ -195,6 +200,7 @@ func (s *streamingRTCConn) onICECandidate(i *webrtc.ICECandidate, clanId, channe
 	// Using Marshal will result in errors around `sdpMid`
 	candidateString, err := json.Marshal(i.ToJSON())
 	if err != nil {
+		log.Println("onICECandidate err: ", err)
 		return err
 	}
 
@@ -335,7 +341,8 @@ func (s *streamingRTCConn) createPeerConnection(offer *webrtc.SessionDescription
 		return nil, err
 	}
 
-	s.sendAnswer(pc, clientId)
+	s.audiences[clientId] = pc
+	s.sendAnswer(clientId)
 
 	// Read incoming RTCP packets
 	// Before these packets are returned they are processed by interceptors. For things
@@ -353,7 +360,16 @@ func (s *streamingRTCConn) createPeerConnection(offer *webrtc.SessionDescription
 		log.Printf("Connection State has changed %s \n", state.String())
 
 		switch state {
-		case webrtc.ICEConnectionStateConnected, webrtc.ICEConnectionStateClosed:
+		case webrtc.ICEConnectionStateDisconnected, webrtc.ICEConnectionStateClosed:
+			_, ok := s.audiences[clientId]
+			if ok {
+				delete(s.audiences, clientId)
+			}
+
+			// goto sendMessage
+			fallthrough
+
+		case webrtc.ICEConnectionStateConnected:
 			s.sendMessage(&WsMsg{
 				ClanId:    s.clanId,
 				ChannelId: s.channelId,
@@ -372,17 +388,21 @@ func (s *streamingRTCConn) createPeerConnection(offer *webrtc.SessionDescription
 }
 
 func (s *streamingRTCConn) connectPublisher() {
-	s.sendMessage(&WsMsg{
+	err := s.sendMessage(&WsMsg{
 		Key:       "connect_publisher",
 		ClanId:    s.clanId,
 		ChannelId: s.channelId,
 		UserId:    s.username,
 	})
+	if err != nil {
+		log.Println("can not send connect_publisher err: ", err)
+	}
 }
 
 func (s *streamingRTCConn) sendMessage(data *WsMsg) error {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
+		log.Println("can not marshal json err: ", err)
 		return err
 	}
 
