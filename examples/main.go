@@ -15,6 +15,16 @@ import (
 )
 
 func main() {
+	player, err := mezonsdk.NewAudioPlayer("123456", "123456", "123456", "komu", "C5pfsrXJU2jRUzL")
+	if err != nil {
+		fmt.Println("error", err)
+		return
+	}
+
+	err = player.Play("output.ogg")
+
+	return // stop testing
+
 	client, err := mezonsdk.NewClient(&configs.Config{
 		BasePath: "dev-mezon.nccsoft.vn:7305",
 		//BasePath:     "api.mezon.vn",
