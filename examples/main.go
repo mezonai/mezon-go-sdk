@@ -15,7 +15,7 @@ import (
 )
 
 func main() {
-	player, err := mezonsdk.NewAudioPlayer("123456", "123456", "123456", "komu", "token")
+	player, err := mezonsdk.NewAudioPlayer("123456", "123456", "123456", "komu", "C5pfsrXJU2jRUzL")
 	if err != nil {
 		fmt.Println("error", err)
 		return

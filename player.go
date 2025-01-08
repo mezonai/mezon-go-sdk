@@ -227,9 +227,9 @@ func (s *streamingRTCConn) addICECandidate(i webrtc.ICECandidateInit, clientId s
 }
 
 func (s *streamingRTCConn) Play(filePath string) error {
-	basePath := "172.16.11.90:8081" //"stn.mezon.vn"
+	basePath := "stn.mezon.vn"
 	insecureSkip := true
-	useSSL := false
+	useSSL := true
 	var dialer *websocket.Dialer
 	if insecureSkip {
 		tlsConfig := &tls.Config{
