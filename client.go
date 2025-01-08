@@ -77,7 +77,7 @@ func getAuthenticate(c *configs.Config, api *swagger.MezonApiService) (string, e
 
 func getSwaggerConfig(c *configs.Config) *swagger.Configuration {
 	cfg := swagger.NewConfiguration()
-	cfg.BasePath = utils.GetBasePath("http", c.BasePath, c.UseSSL)
+	cfg.BasePath = utils.GetBasePath("http", "api.mezon.vn", c.UseSSL)
 	if c.Timeout == 0 {
 		c.Timeout = 15
 	}
