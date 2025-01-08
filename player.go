@@ -36,6 +36,11 @@ type WsMsg struct {
 	Value       json.RawMessage
 }
 
+type Audience struct {
+	userId string
+	peer   *webrtc.PeerConnection
+}
+
 type streamingRTCConn struct {
 	clanId    string
 	channelId string
@@ -45,7 +50,7 @@ type streamingRTCConn struct {
 	// TODO: streaming video (#rapchieuphim)
 	// videoTrack *webrtc.TrackLocalStaticRTP
 	audioTrack *webrtc.TrackLocalStaticSample
-	audiences  map[string]*webrtc.PeerConnection
+	audiences  map[string]*Audience
 
 	ctx        context.Context
 	cancelFunc context.CancelFunc
@@ -97,7 +102,7 @@ func NewAudioPlayer(clanId, channelId, userId, username, token string) (AudioPla
 		audioTrack: audioTrack,
 		ctx:        ctx,
 		cancelFunc: cancel,
-		audiences:  make(map[string]*webrtc.PeerConnection),
+		audiences:  make(map[string]*Audience),
 	}
 
 	MapStreamingRtcConn.Store(channelId, rtcConnection)
@@ -113,9 +118,9 @@ func (s *streamingRTCConn) Close(channelId string) {
 		return
 	}
 
-	for _, peer := range rtcConn.(*streamingRTCConn).audiences {
-		if peer != nil && peer.ConnectionState() != webrtc.PeerConnectionStateClosed {
-			peer.Close()
+	for _, audience := range rtcConn.(*streamingRTCConn).audiences {
+		if audience != nil && audience.peer != nil && audience.peer.ConnectionState() != webrtc.PeerConnectionStateClosed {
+			audience.peer.Close()
 		}
 	}
 	rtcConn.(*streamingRTCConn).cancel()
@@ -150,7 +155,7 @@ func (s *streamingRTCConn) OnWebsocketEvent(event *WsMsg) error {
 			log.Println("unmarshal err: ", err)
 			return err
 		}
-		_, err = s.createPeerConnection(&offer, event.ClientId)
+		_, err = s.createPeerConnection(&offer, event.ClientId, event.UserId)
 		if err != nil {
 			log.Println("session subscriber err: ", err)
 			return err
@@ -169,15 +174,15 @@ func (s *streamingRTCConn) OnWebsocketEvent(event *WsMsg) error {
 }
 
 func (s *streamingRTCConn) sendAnswer(clientId string) error {
-	pc, ok := s.audiences[clientId]
-	if !ok {
+	audience, ok := s.audiences[clientId]
+	if !ok || audience.peer == nil {
 		return errors.New("not init audience")
 	}
-	answer, err := pc.CreateAnswer(nil)
+	answer, err := audience.peer.CreateAnswer(nil)
 	if err != nil {
 		return err
 	}
-	if err := pc.SetLocalDescription(answer); err != nil {
+	if err := audience.peer.SetLocalDescription(answer); err != nil {
 		return err
 	}
 
@@ -215,8 +220,8 @@ func (s *streamingRTCConn) onICECandidate(i *webrtc.ICECandidate, clanId, channe
 
 func (s *streamingRTCConn) addICECandidate(i webrtc.ICECandidateInit, clientId string) error {
 	var err error
-	if peer, ok := s.audiences[clientId]; ok {
-		err = peer.AddICECandidate(i)
+	if audience, ok := s.audiences[clientId]; ok && audience.peer != nil {
+		err = audience.peer.AddICECandidate(i)
 	}
 	return err
 }
@@ -328,7 +333,7 @@ func (s *streamingRTCConn) Play(filePath string) error {
 	}
 }
 
-func (s *streamingRTCConn) createPeerConnection(offer *webrtc.SessionDescription, clientId string) (*webrtc.PeerConnection, error) {
+func (s *streamingRTCConn) createPeerConnection(offer *webrtc.SessionDescription, userId, clientId string) (*webrtc.PeerConnection, error) {
 	log.Printf("createPeerConnection %s \n", clientId)
 	pc, err := webrtc.NewPeerConnection(config)
 	if err != nil {
@@ -342,7 +347,10 @@ func (s *streamingRTCConn) createPeerConnection(offer *webrtc.SessionDescription
 		return nil, err
 	}
 
-	s.audiences[clientId] = pc
+	s.audiences[clientId] = &Audience{
+		peer:   pc,
+		userId: userId,
+	}
 	s.sendAnswer(clientId)
 
 	// Read incoming RTCP packets
@@ -371,13 +379,18 @@ func (s *streamingRTCConn) createPeerConnection(offer *webrtc.SessionDescription
 			fallthrough
 
 		case webrtc.ICEConnectionStateConnected:
-			s.sendMessage(&WsMsg{
-				ClanId:    s.clanId,
-				ChannelId: s.channelId,
-				Key:       "session_state_changed",
-				ClientId:  clientId,
-				State:     int(state),
-			})
+			for clientId, audience := range s.audiences {
+				if audience.peer == pc {
+					s.sendMessage(&WsMsg{
+						ClanId:    s.clanId,
+						ChannelId: s.channelId,
+						Key:       "session_state_changed",
+						ClientId:  clientId,
+						UserId:    audience.userId,
+						State:     int(state),
+					})
+				}
+			}
 		}
 	})
 
