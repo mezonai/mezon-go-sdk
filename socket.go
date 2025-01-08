@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nccasia/mezon-go-sdk/configs"
+	"github.com/nccasia/mezon-go-sdk/constants"
 	"github.com/nccasia/mezon-go-sdk/utils"
 
 	"github.com/nccasia/mezon-go-sdk/mezon-protobuf/mezon/v2/common/rtapi"
@@ -46,14 +47,14 @@ func NewWSConnection(c *configs.Config, token string, clanIds []string) (IWSConn
 	socket := &WSConnection{
 		token:                  token,
 		clanIds:                clanIds,
-		basePath:               utils.GetBasePath("ws", c.BasePath, c.UseSSL),
+		basePath:               utils.GetBasePath("ws", constants.MznBasePath, constants.UseSSL),
 		onJoinStreamingChannel: recvDefaultHandler,
 		onWebrtcSignalingFwd:   recvDefaultHandler,
 		onPong:                 recvDefaultHandler,
 		onChannelMessage:       recvDefaultHandler,
 	}
 
-	if c.InsecureSkip {
+	if constants.InsecureSkip {
 		tlsConfig := &tls.Config{
 			InsecureSkipVerify: true,
 		}

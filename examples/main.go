@@ -6,7 +6,6 @@ import (
 	"time"
 
 	mezonsdk "github.com/nccasia/mezon-go-sdk"
-	"github.com/nccasia/mezon-go-sdk/configs"
 	swagger "github.com/nccasia/mezon-go-sdk/mezon-api"
 	"github.com/nccasia/mezon-go-sdk/mezon-protobuf/mezon/v2/common/api"
 	"github.com/nccasia/mezon-go-sdk/mezon-protobuf/mezon/v2/common/rtapi"
@@ -25,12 +24,7 @@ func main() {
 
 	return // stop testing
 
-	client, err := mezonsdk.NewClient(&configs.Config{
-		ApiKey:       "xxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-		Timeout:      10,
-		InsecureSkip: true,
-		UseSSL:       true,
-	})
+	client, err := mezonsdk.NewClient("xxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
 
 	if err != nil {
 		panic(err)

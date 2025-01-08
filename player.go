@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/nccasia/mezon-go-sdk/constants"
 	"github.com/nccasia/mezon-go-sdk/utils"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
@@ -227,11 +228,8 @@ func (s *streamingRTCConn) addICECandidate(i webrtc.ICECandidateInit, clientId s
 }
 
 func (s *streamingRTCConn) Play(filePath string) error {
-	basePath := "172.16.11.90:8081" //"stn.mezon.vn"
-	insecureSkip := true
-	useSSL := false
 	var dialer *websocket.Dialer
-	if insecureSkip {
+	if constants.InsecureSkip {
 		tlsConfig := &tls.Config{
 			InsecureSkipVerify: true,
 		}
@@ -241,7 +239,7 @@ func (s *streamingRTCConn) Play(filePath string) error {
 	} else {
 		dialer = websocket.DefaultDialer
 	}
-	basePath = utils.GetBasePath("ws", basePath, useSSL)
+	basePath := utils.GetBasePath("ws", constants.StnBasePath, constants.UseSSL)
 
 	conn, _, err := dialer.Dial(fmt.Sprintf("%s/ws?username=%s&token=%s", basePath, s.username, s.token), nil)
 	if err != nil {
@@ -370,27 +368,18 @@ func (s *streamingRTCConn) createPeerConnection(offer *webrtc.SessionDescription
 
 		switch state {
 		case webrtc.ICEConnectionStateDisconnected, webrtc.ICEConnectionStateClosed:
-			_, ok := s.audiences[clientId]
+			audience, ok := s.audiences[clientId]
 			if ok {
+				s.sendToStn(audience, int(state), clientId)
 				delete(s.audiences, clientId)
 			}
-
-			// goto sendMessage
-			fallthrough
-
 		case webrtc.ICEConnectionStateConnected:
-			for clientId, audience := range s.audiences {
-				if audience.peer == pc {
-					s.sendMessage(&WsMsg{
-						ClanId:    s.clanId,
-						ChannelId: s.channelId,
-						Key:       "session_state_changed",
-						ClientId:  clientId,
-						UserId:    audience.userId,
-						State:     int(state),
-					})
-				}
+			audience, ok := s.audiences[clientId]
+			if !ok {
+				log.Printf("audience not found %s \n", state.String())
+				return
 			}
+			s.sendToStn(audience, int(state), clientId)
 		}
 	})
 
@@ -399,6 +388,17 @@ func (s *streamingRTCConn) createPeerConnection(offer *webrtc.SessionDescription
 	})
 
 	return pc, nil
+}
+
+func (s *streamingRTCConn) sendToStn(audience *Audience, state int, clientId string) {
+	s.sendMessage(&WsMsg{
+		ClanId:    s.clanId,
+		ChannelId: s.channelId,
+		Key:       "session_state_changed",
+		ClientId:  clientId,
+		UserId:    audience.userId,
+		State:     state,
+	})
 }
 
 func (s *streamingRTCConn) connectPublisher() {
