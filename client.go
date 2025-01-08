@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nccasia/mezon-go-sdk/configs"
+	"github.com/nccasia/mezon-go-sdk/constants"
 	"github.com/nccasia/mezon-go-sdk/utils"
 
 	swagger "github.com/nccasia/mezon-go-sdk/mezon-api"
@@ -21,7 +22,11 @@ type Client struct {
 	Socket IWSConnection
 }
 
-func NewClient(c *configs.Config) (*Client, error) {
+func NewClient(apiKey string) (*Client, error) {
+	c := &configs.Config{
+		ApiKey:  apiKey,
+		Timeout: 15,
+	}
 	cfg := getSwaggerConfig(c)
 	api := swagger.NewAPIClient(cfg).MezonApi
 	token, err := getAuthenticate(c, api)
@@ -77,12 +82,12 @@ func getAuthenticate(c *configs.Config, api *swagger.MezonApiService) (string, e
 
 func getSwaggerConfig(c *configs.Config) *swagger.Configuration {
 	cfg := swagger.NewConfiguration()
-	cfg.BasePath = utils.GetBasePath("http", "api.mezon.vn", c.UseSSL)
+	cfg.BasePath = utils.GetBasePath("http", constants.MznBasePath, constants.UseSSL)
 	if c.Timeout == 0 {
 		c.Timeout = 15
 	}
 
-	if c.InsecureSkip {
+	if constants.InsecureSkip {
 		cfg.HTTPClient = &http.Client{
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{
