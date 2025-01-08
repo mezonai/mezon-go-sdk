@@ -81,11 +81,11 @@ func (s *WSConnection) newWSConnection() error {
 	s.conn = conn
 
 	if err = s.joinClan(s.clanIds); err != nil {
-		log.Printf("WebSocket join clan: %s, err: %+v \n", err)
+		log.Printf("WebSocket join clan, err: %+v \n", err)
 		return err
 	}
 
-	s.reconnect()
+	// s.reconnect()
 	s.pingPong()
 	s.recvMessage()
 
@@ -148,6 +148,7 @@ func (s *WSConnection) pingPong() {
 					if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) ||
 						websocket.IsUnexpectedCloseError(err) {
 						log.Println("WebSocket connection closed:", err)
+						s.reconnect()
 						return
 					}
 					continue
