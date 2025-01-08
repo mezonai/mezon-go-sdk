@@ -155,7 +155,7 @@ func (s *streamingRTCConn) OnWebsocketEvent(event *WsMsg) error {
 			log.Println("unmarshal err: ", err)
 			return err
 		}
-		_, err = s.createPeerConnection(&offer, event.ClientId, event.UserId)
+		_, err = s.createPeerConnection(&offer, event.UserId, event.ClientId)
 		if err != nil {
 			log.Println("session subscriber err: ", err)
 			return err
@@ -227,9 +227,9 @@ func (s *streamingRTCConn) addICECandidate(i webrtc.ICECandidateInit, clientId s
 }
 
 func (s *streamingRTCConn) Play(filePath string) error {
-	basePath := "stn.mezon.vn"
+	basePath := "172.16.11.90:8081" //"stn.mezon.vn"
 	insecureSkip := true
-	useSSL := true
+	useSSL := false
 	var dialer *websocket.Dialer
 	if insecureSkip {
 		tlsConfig := &tls.Config{
