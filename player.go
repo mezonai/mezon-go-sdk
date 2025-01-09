@@ -121,6 +121,8 @@ func (s *streamingRTCConn) Close(channelId string) {
 		return
 	}
 
+	s.stopPublisher()
+
 	for _, audience := range rtcConn.(*streamingRTCConn).audiences {
 		if audience != nil && audience.peer != nil && audience.peer.ConnectionState() != webrtc.PeerConnectionStateClosed {
 			audience.peer.Close()
@@ -132,12 +134,6 @@ func (s *streamingRTCConn) Close(channelId string) {
 }
 
 func (s *streamingRTCConn) Cancel(channelId string) {
-	s.sendMessage(&WsMsg{
-		Key:       "stop_publisher",
-		ClanId:    s.clanId,
-		ChannelId: s.channelId,
-		UserId:    s.userId,
-	})
 	s.cancel()
 }
 
@@ -415,6 +411,18 @@ func (s *streamingRTCConn) connectPublisher() {
 	})
 	if err != nil {
 		log.Println("can not send connect_publisher err: ", err)
+	}
+}
+
+func (s *streamingRTCConn) stopPublisher() {
+	err := s.sendMessage(&WsMsg{
+		Key:       "stop_publisher",
+		ClanId:    s.clanId,
+		ChannelId: s.channelId,
+		UserId:    s.userId,
+	})
+	if err != nil {
+		log.Println("can not send stop_publisher err: ", err)
 	}
 }
 
