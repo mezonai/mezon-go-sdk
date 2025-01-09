@@ -241,7 +241,7 @@ func (s *streamingRTCConn) Play(filePath string) error {
 	} else {
 		dialer = websocket.DefaultDialer
 	}
-	basePath := utils.GetBasePath("wss", constants.StnBasePath, false)
+	basePath := utils.GetBasePath("wss", constants.StnBasePath, constants.UseSSL)
 
 	conn, _, err := dialer.Dial(fmt.Sprintf("%s/ws?username=%s&token=%s", basePath, s.username, s.token), nil)
 	if err != nil {
