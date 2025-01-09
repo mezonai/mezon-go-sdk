@@ -45,6 +45,7 @@ type Audience struct {
 type streamingRTCConn struct {
 	clanId    string
 	channelId string
+	userId    string
 	username  string
 	token     string
 
@@ -97,9 +98,10 @@ func NewAudioPlayer(clanId, channelId, userId, username, token string) (AudioPla
 	// save to store
 	rtcConnection := &streamingRTCConn{
 		clanId:     clanId,
+		channelId:  channelId,
+		userId:     userId,
 		username:   username,
 		token:      token,
-		channelId:  channelId,
 		audioTrack: audioTrack,
 		ctx:        ctx,
 		cancelFunc: cancel,
@@ -119,6 +121,8 @@ func (s *streamingRTCConn) Close(channelId string) {
 		return
 	}
 
+	s.stopPublisher()
+
 	for _, audience := range rtcConn.(*streamingRTCConn).audiences {
 		if audience != nil && audience.peer != nil && audience.peer.ConnectionState() != webrtc.PeerConnectionStateClosed {
 			audience.peer.Close()
@@ -130,11 +134,6 @@ func (s *streamingRTCConn) Close(channelId string) {
 }
 
 func (s *streamingRTCConn) Cancel(channelId string) {
-	s.sendMessage(&WsMsg{
-		Key:       "stop_publisher",
-		ClanId:    s.clanId,
-		ChannelId: s.channelId,
-	})
 	s.cancel()
 }
 
@@ -193,6 +192,7 @@ func (s *streamingRTCConn) sendAnswer(clientId string) error {
 		Key:       "sd_answer",
 		ClanId:    s.clanId,
 		ChannelId: s.channelId,
+		UserId:    s.userId,
 		ClientId:  clientId,
 		Value:     byteJson,
 	})
@@ -215,6 +215,7 @@ func (s *streamingRTCConn) onICECandidate(i *webrtc.ICECandidate, clanId, channe
 		Value:     candidateString,
 		ClanId:    clanId,
 		ChannelId: channelId,
+		UserId:    s.userId,
 		ClientId:  clientId,
 	})
 }
@@ -406,10 +407,22 @@ func (s *streamingRTCConn) connectPublisher() {
 		Key:       "connect_publisher",
 		ClanId:    s.clanId,
 		ChannelId: s.channelId,
-		UserId:    s.username,
+		UserId:    s.userId,
 	})
 	if err != nil {
 		log.Println("can not send connect_publisher err: ", err)
+	}
+}
+
+func (s *streamingRTCConn) stopPublisher() {
+	err := s.sendMessage(&WsMsg{
+		Key:       "stop_publisher",
+		ClanId:    s.clanId,
+		ChannelId: s.channelId,
+		UserId:    s.userId,
+	})
+	if err != nil {
+		log.Println("can not send stop_publisher err: ", err)
 	}
 }
 
