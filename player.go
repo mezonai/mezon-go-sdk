@@ -63,7 +63,7 @@ type streamingRTCConn struct {
 var config = webrtc.Configuration{
 	ICEServers: []webrtc.ICEServer{
 		{
-			URLs:       []string{"turn:turn.mezon.vn:5349", "stun:stun.l.google.com:19302"},
+			URLs:       []string{"turn:turn.mezon.vn:5349", "stun:turn.mezon.vn:3478 ", "stun:stun.l.google.com:19302"},
 			Username:   "turnmezon",
 			Credential: "QuTs4zUEcbylWemXL7MK",
 		},
