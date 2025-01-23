@@ -63,7 +63,7 @@ type streamingRTCConn struct {
 var config = webrtc.Configuration{
 	ICEServers: []webrtc.ICEServer{
 		{
-			URLs:       []string{"turn:turn.mezon.vn:5349", "stun:turn.mezon.vn:3478 ", "stun:stun.l.google.com:19302"},
+			URLs:       []string{"turn:replay.mezon.vn:5349", "stun:stun.l.google.com:19302"},
 			Username:   "turnmezon",
 			Credential: "QuTs4zUEcbylWemXL7MK",
 		},
@@ -241,7 +241,7 @@ func (s *streamingRTCConn) Play(filePath string) error {
 	} else {
 		dialer = websocket.DefaultDialer
 	}
-  
+
 	basePath := utils.GetBasePath("ws", constants.StnBasePath, constants.UseSSL)
 
 	conn, _, err := dialer.Dial(fmt.Sprintf("%s/ws?username=%s&token=%s", basePath, s.username, s.token), nil)
