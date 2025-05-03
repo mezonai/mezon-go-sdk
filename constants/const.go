@@ -1,7 +1,7 @@
 package constants
 
 const (
-	MznBasePath        = "api.mezon.vn"
+	MznBasePath        = "api.mezon.ai"
 	StnBasePath        = "stn.mezon.vn"
 	AutoRefreshSession = true
 	InsecureSkip       = true
