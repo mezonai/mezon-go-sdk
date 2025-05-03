@@ -13,7 +13,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/nccasia/mezon-go-sdk/constants"
 	"github.com/nccasia/mezon-go-sdk/utils"
-	"github.com/pion/webrtc/v4"
 )
 
 var (
@@ -53,16 +52,6 @@ type streamingMediaConn struct {
 	cancelFunc context.CancelFunc
 
 	wsconn *websocket.Conn
-}
-
-var config = webrtc.Configuration{
-	ICEServers: []webrtc.ICEServer{
-		{
-			URLs:       []string{"turn:relay.mezon.vn:5349", "stun:stun.l.google.com:19302"},
-			Username:   "turnmezon",
-			Credential: "QuTs4zUEcbylWemXL7MK",
-		},
-	},
 }
 
 type AudioPlayer interface {
