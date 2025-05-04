@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	MapStreamingRtcConn sync.Map // map[channelId]*RTCConnection
+	MapStreamingMediaConn sync.Map // map[channelId]*RTCConnection
 )
 
 type FileUrl struct {
@@ -64,7 +64,7 @@ func NewAudioPlayer(clanId, channelId, userId, username, token string) (AudioPla
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// save to store
-	rtcConnection := &streamingMediaConn{
+	mediaConnection := &streamingMediaConn{
 		clanId:     clanId,
 		channelId:  channelId,
 		userId:     userId,
@@ -75,21 +75,21 @@ func NewAudioPlayer(clanId, channelId, userId, username, token string) (AudioPla
 		audiences:  make(map[string]*Audience),
 	}
 
-	MapStreamingRtcConn.Store(channelId, rtcConnection)
+	MapStreamingMediaConn.Store(channelId, mediaConnection)
 
-	return rtcConnection, nil
+	return mediaConnection, nil
 }
 
 func (s *streamingMediaConn) Close(channelId string) {
-	rtcConn, ok := MapStreamingRtcConn.Load(channelId)
+	mediaConn, ok := MapStreamingMediaConn.Load(channelId)
 	if !ok {
 		return
 	}
 
-	rtcConn.(*streamingMediaConn).cancel()
+	mediaConn.(*streamingMediaConn).cancel()
 	s.stopPublisher()
 
-	MapStreamingRtcConn.Delete(channelId)
+	MapStreamingMediaConn.Delete(channelId)
 }
 
 func (s *streamingMediaConn) Cancel(channelId string) {
@@ -119,7 +119,6 @@ func (s *streamingMediaConn) Play(fileUrl string) error {
 	}
 
 	basePath := utils.GetBasePath("ws", constants.StnBasePath, constants.UseSSL)
-
 	conn, _, err := dialer.Dial(fmt.Sprintf("%s/ws?username=%s&token=%s", basePath, s.username, s.token), nil)
 	if err != nil {
 		log.Println("WebSocket connection open err: ", err)
