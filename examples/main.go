@@ -10,10 +10,13 @@ import (
 )
 
 func main() {
-	username := "komu"
-	token := "C5pfsrXJU2jRUzL"
+	client, err := mezonsdk.NewClient("")
+	if err != nil {
+		fmt.Println("error", err)
+		return
+	}
 
-	player, err := mezonsdk.NewAudioPlayer("123456", "123456", "123456", username, token)
+	player, err := client.NewAudioPlayer("123456", "123456")
 	if err != nil {
 		fmt.Println("error", err)
 		return

@@ -65,6 +65,24 @@ func (c *Client) CreateSocket() (IWSConnection, error) {
 	return socket, nil
 }
 
+func (c *Client) NewAudioPlayer(clanId, channelId string) (AudioPlayer, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// save to store
+	mediaConnection := &streamingMediaConn{
+		clanId:     clanId,
+		channelId:  channelId,
+		token:      c.token,
+		ctx:        ctx,
+		cancelFunc: cancel,
+		audiences:  make(map[string]*Audience),
+	}
+
+	MapStreamingMediaConn.Store(channelId, mediaConnection)
+
+	return mediaConnection, nil
+}
+
 func getAuthenticate(c *configs.Config, api *swagger.MezonApiService) (string, error) {
 	cfg := getSwaggerConfig(c)
 
