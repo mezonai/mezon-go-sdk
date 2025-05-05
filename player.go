@@ -60,26 +60,6 @@ type AudioPlayer interface {
 	Cancel(channelId string)
 }
 
-func NewAudioPlayer(clanId, channelId, userId, username, token string) (AudioPlayer, error) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	// save to store
-	mediaConnection := &streamingMediaConn{
-		clanId:     clanId,
-		channelId:  channelId,
-		userId:     userId,
-		username:   username,
-		token:      token,
-		ctx:        ctx,
-		cancelFunc: cancel,
-		audiences:  make(map[string]*Audience),
-	}
-
-	MapStreamingMediaConn.Store(channelId, mediaConnection)
-
-	return mediaConnection, nil
-}
-
 func (s *streamingMediaConn) Close(channelId string) {
 	mediaConn, ok := MapStreamingMediaConn.Load(channelId)
 	if !ok {
