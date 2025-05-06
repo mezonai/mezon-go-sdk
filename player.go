@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"time"
 
 	"sync"
 
@@ -106,8 +105,6 @@ func (s *streamingMediaConn) Play(fileUrl string) error {
 	}
 
 	s.wsconn = conn
-	s.sessionPublisher()
-	time.Sleep(100 * time.Millisecond)
 	s.connectPublisher(fileUrl)
 
 	return nil
@@ -122,18 +119,6 @@ func (s *streamingMediaConn) sendToStn(audience *Audience, state int, clientId s
 		UserId:    audience.userId,
 		State:     state,
 	})
-}
-
-func (s *streamingMediaConn) sessionPublisher() {
-	err := s.sendMessage(&WsMsg{
-		Key:       "session_publisher",
-		ClanId:    s.clanId,
-		ChannelId: s.channelId,
-		UserId:    s.userId,
-	})
-	if err != nil {
-		log.Println("can not send connect_publisher err: ", err)
-	}
 }
 
 func (s *streamingMediaConn) connectPublisher(fileUrl string) {
